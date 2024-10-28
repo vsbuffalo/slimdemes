@@ -1,0 +1,25 @@
+initialize() {
+  source("eidos/demes.eidos");
+
+  defineConstant("SCALING_FACTOR", 10.0);
+  defineConstant("MUTATION_RATE", 0);
+  defineConstant("RECOMBINATION_RATE", 0);
+  defineConstant("CONTIG_LENGTH", 100);
+  defineConstant("TREES_FILE", "slim_out.trees");
+
+  initializeTreeSeq();
+  initializeMutationRate(SCALING_FACTOR * MUTATION_RATE);
+  initializeMutationType("m1", 0.5, "f", 0.0);
+  initializeGenomicElementType("g1", m1, 1.0);
+  initializeGenomicElement(g1, 0, CONTIG_LENGTH - 1);
+  initializeRecombinationRate((1 - (1 - 2 * RECOMBINATION_RATE)^SCALING_FACTOR) / 2);
+
+}
+
+1 early() {
+    model = load_demes();
+}
+
+s1 late() {
+    sim.treeSeqOutput(TREES_FILE);
+}

@@ -1,0 +1,17 @@
+[project]
+name = "slim-demes"
+version = "0.1.0"
+description = "Helper Python scripts for slim-demes"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "defopt>=6.4.0",
+    "demes>=0.2.3",
+    "moments>=2.0",
+    "msprime>=1.3.3",
+    "pyyaml>=6.0.2",
+    "stdpopsim>=0.2.0",
+]
+
+[project.scripts]
+slimdemes = "slimdemes:main"
