@@ -1,0 +1,361 @@
+// Demes for SLiM
+// WARNING: this is not a full implementation of the Demes specification!
+
+function (void)assert_wf(void) {
+  if (community.modelType != "WF") {
+    stop("Non-Wright-Fisher models are not supported.");
+  }
+}
+
+function (void)assert_in_generations(object<Dictionary>$ model) {
+  valid_model = model.getValue("time_units") == "generations" & model.getValue("generation_time") != 1;
+  if (valid_model) {
+    stop("Demes file must have time_units = \"generations\" and generation_time = 1. Use slimdeme convert.");
+  }
+}
+
+function (object<Dictionary>$)load_demes(void) {
+  assert_wf();
+  if (!exists("demes_json")) {
+    stop("must define JSON demes file with -d demes_file=\\\"<model.json>\\\"");
+  }
+  model_lines = readFile(demes_json);
+  model_string = paste(model_lines, sep="\n");
+  model = Dictionary(model_string);
+  assert_in_generations(model);
+  time_bounds = event_time_bounds(model);
+  print(time_bounds);
+  pops = setup_populations(model, time_bounds);
+  print(pops);
+  schedule_events(model, pops, time_bounds);
+  // validate_demes(model);
+  return model;
+}
+
+// Accessor function to get the demes out of a collection of demes.
+function (object)get_demes(object<Dictionary>$ model) {
+  return model.getValue("demes");
+}
+
+// Accessor function to get the epochs out of a single deme.
+function (object)get_epochs(object<Dictionary>$ deme) {
+  return deme.getValue("epochs");
+}
+
+// Return whether a dictionary contains a key
+// (this should be a method)
+function (logical$)dictContains(object<Dictionary>$ dict, string$ key) {
+  return !isNULL(dict.getValue(key));
+}
+
+// Get the start time of an epoch
+function (float)get_epoch_start(object$ epoch, object<Dictionary>$ deme, integer$ epoch_index) {
+  if (epoch_index == 0) {
+    // For first epoch, use deme's start_time
+    if (dictContains(deme, "start_time")) {
+      start_time_str = deme.getValue("start_time");
+      if (start_time_str == "Infinity") {
+        return INF;
+      }
+      return asFloat(start_time_str);
+    } else {
+      return INF; // Root demes without explicit start_time are infinite
+    }
+  } else {
+    // For subsequent epochs, use previous epoch's end_time
+    epochs = get_epochs(deme);
+    return asFloat(epochs[epoch_index - 1].getValue("end_time"));
+  }
+}
+
+// Get the end time of an epoch
+function (float)get_epoch_end(object$ epoch) {
+  end_time = asFloat(epoch.getValue("end_time"));
+  return end_time;
+}
+
+// Return the time bounds of the demes model.
+function (float)event_time_bounds(object<Dictionary>$ model) {
+  t_max = 0.0;
+  t_min = INF;
+  demes = get_demes(model);
+
+  for (i in seqLen(size(demes))) {
+    deme = demes[i];
+    epochs = get_epochs(deme);
+
+    for (j in seqLen(size(epochs))) {
+      epoch = epochs[j];
+      start_time = get_epoch_start(epoch, deme, j);
+      end_time = get_epoch_end(epoch);
+
+      if (!isInfinite(start_time)) {
+        t_max = max(t_max, start_time);
+      }
+      t_max = max(t_max, end_time);
+      t_min = min(t_min, end_time);
+    }
+  }
+  assert(t_max > t_min);
+  return c(t_max, t_min);
+}
+
+// Get the population size of an epoch.
+function (float)get_epoch_size(object$ epoch, object<Dictionary>$ deme, integer$ epoch_index) {
+  // Check if start_size is directly specified
+  if (dictContains(epoch, "start_size")) {
+    return asFloat(epoch.getValue("start_size"));
+  }
+
+  // If it's the first epoch
+  if (epoch_index == 0) {
+    // Must have end_size if no start_size
+    if (!dictContains(epoch, "end_size")) {
+      stop("First epoch must specify either start_size or end_size");
+    }
+    return asFloat(epoch.getValue("end_size"));
+  }
+
+  // For subsequent epochs, use previous epoch's end_size
+  epochs = get_epochs(deme);
+  prev_epoch = epochs[epoch_index - 1];
+  return asFloat(prev_epoch.getValue("end_size"));
+}
+
+// Set up initial populations based on the earliest epoch of each deme
+// This will return dictionary that maps the population
+// integer IDs to the deme names.
+function (object<Dictionary>$)setup_populations(object<Dictionary>$ model, float time_bounds) {
+  demes = get_demes(model);
+  pop_id = 0;  // Start from 0 to match expected indices
+  pops = Dictionary();
+
+  for (i in seqLen(size(demes))) {
+    deme = demes[i];
+    deme_name = deme.getValue("name");
+
+    // Only create populations that don't have ancestors
+    if (!has_ancestors(deme)) {
+      epochs = get_epochs(deme);
+      first_epoch = epochs[0];
+      // Get initial population size
+      initial_size = get_epoch_size(first_epoch, deme, i);
+      scaled_size = asInteger(initial_size / SCALING_FACTOR);
+      // Create the population
+      sim.addSubpop(pop_id, scaled_size);
+      sim.subpopulations[pop_id].setValue("name", deme_name);
+      pops.setValue(pop_id, deme_name);
+      pop_id = pop_id + 1;
+    } else {
+      // Still add to pops dictionary with same index scheme
+      pops.setValue(i, deme_name);
+    }
+  }
+  return pops;
+}
+
+// Check if a deme has ancestors
+function (logical$)has_ancestors(object<Dictionary>$ deme) {
+  if (!dictContains(deme, "ancestors")) {
+    return FALSE;
+  }
+  ancestors = deme.getValue("ancestors");
+  return size(ancestors) > 0;
+}
+
+// Get ancestors proportions, returns array of proportions
+function (float)get_ancestor_proportions(object<Dictionary>$ deme) {
+  if (!dictContains(deme, "proportions")) {
+    // Handle single ancestor case per spec
+    if (size(deme.getValue("ancestors")) == 1) {
+      return c(1.0);
+    }
+    stop("Missing required proportions for multiple ancestors");
+  }
+  return asFloat(deme.getValue("proportions"));
+}
+
+
+// Convert from backwards time (in demes) to forwards time (in SLiM)
+function (integer$)get_tick_from_demes_time(float$ demes_time, float time_bounds) {
+    // time_bounds[0] is t_max (most ancient finite time)
+    // time_bounds[1] is t_min (most recent time)
+    model_duration = time_bounds[0] - time_bounds[1];
+
+    // Using f = d - t formula from spec, adding 1 for SLiM's 1-based ticks
+    tick = asInteger(model_duration - demes_time) + 1;
+    return tick;
+}
+
+
+// Build script string for population creation event
+function (string$)build_split_script(string$ child_name, integer$ child_id,
+                                   string$ ancestors, integer$ ancestor_ids,
+                                   float$ proportions, integer$ start_size) {
+    if (size(ancestors) == 1) {
+        // Single ancestor split
+        lines = c(
+            "// " + child_name + ": split from " + ancestors[0],
+            "sim.addSubpopSplit(" + child_id + ", " + start_size + ", " + ancestor_ids[0] + ");",
+            "sim.subpopulations[" + child_id + "].setValue(\"name\", \"" + child_name + "\");"
+        );
+        return paste(lines, sep="\n");
+    } else {
+        // Multiple ancestor admixture
+        ancestor_str = paste(ancestors, sep=", ");
+        ancestor_ids_str = paste(asString(ancestor_ids), sep=",");
+        proportions_str = paste(asString(proportions), sep=",");
+        lines = c(
+            "// " + child_name + ": admixture of " + ancestor_str,
+            "sim.addSubpop(" + child_id + ", " + start_size + ");",
+            "sim.subpopulations[" + child_id + "].setValue(\"name\", \"" + child_name + "\");",
+            "sim.subpopulations[" + child_id + "].setMigrationRates(c(" + ancestor_ids_str + "), c(" + proportions_str + "));"
+        );
+        return paste(lines, sep="\n");
+    }
+}
+
+// Register a population split when a deme has ancestors.
+function (void)add_split_event(object<Dictionary>$ events, object<Dictionary>$ deme, object<Dictionary>$ pops, float time_bounds) {
+    // Get deme info
+    name = deme.getValue("name");
+    ancestors = deme.getValue("ancestors");
+    proportions = get_ancestor_proportions(deme);
+    epochs = get_epochs(deme);
+    first_epoch = epochs[0];
+
+    // Get the population IDs
+    child_id = -1;
+    ancestor_ids = c();
+
+    // Find child ID from pops dictionary
+    keys = pops.allKeys;
+    for (i in seqLen(size(keys))) {
+        if (pops.getValue(keys[i]) == name) {
+            child_id = asInteger(keys[i]);
+            break;
+        }
+    }
+
+    // Find ancestor IDs from pops dictionary
+    for (ancestor in ancestors) {
+        for (i in seqLen(size(keys))) {
+            if (pops.getValue(keys[i]) == ancestor) {
+                ancestor_ids = c(ancestor_ids, asInteger(keys[i]));
+                break;
+            }
+        }
+    }
+
+    // Get initial size for the new population
+    start_size = asInteger(get_epoch_size(first_epoch, deme, 0) / SCALING_FACTOR);
+
+    // Convert deme start time to SLiM tick
+    deme_time = asFloat(deme.getValue("start_time"));
+    tick = get_tick_from_demes_time(deme_time, time_bounds);
+
+    // Build and add the script
+    source = build_split_script(name, child_id, ancestors, ancestor_ids, proportions, start_size);
+    add_event(events, source, tick);
+}
+
+function (void)add_event(object<Dictionary>$ events, string$ source, integer$ start, [Ni$ end = NULL], [string$ type = "early"]) {
+    // Force late() for generation 1 events
+    if (start == 1) {
+        type = "late";
+    }
+
+    // Default end to start if not specified
+    if (isNULL(end)) {
+        end = start;
+    }
+
+    // Try to find an existing block
+    if (dictContains(events, "start")) {
+        starts = events.getValue("start");
+        ends = events.getValue("end");
+        types = events.getValue("type");
+        sources = events.getValue("source");
+
+        for (i in seqLen(size(starts))) {
+            if (starts[i] == start & ends[i] == end & types[i] == type) {
+                // Append to existing block
+                sources[i] = sources[i] + "\n" + source;
+                events.setValue("source", sources);
+                return;
+            }
+        }
+    } else {
+        // Initialize dictionary with arrays
+        events.setValue("start", c());
+        events.setValue("end", c());
+        events.setValue("type", c());
+        events.setValue("source", c());
+    }
+
+    // Add new block
+    starts = c(events.getValue("start"), start);
+    ends = c(events.getValue("end"), end);
+    types = c(events.getValue("type"), type);
+    sources = c(events.getValue("source"), source);
+
+    events.setValue("start", starts);
+    events.setValue("end", ends);
+    events.setValue("type", types);
+    events.setValue("source", sources);
+}
+
+function (void)register_events(object<Dictionary>$ events) {
+    if (!dictContains(events, "start"))
+        return;
+
+    starts = events.getValue("start");
+    for (i in seqLen(size(starts))) {
+        source = events.getValue("source")[i];
+        start = events.getValue("start")[i];
+        end = events.getValue("end")[i];
+        type = events.getValue("type")[i];
+
+        source = "{\n    " + paste(strsplit(source, "\n"), sep="\n    ") + "\n}";
+
+        if (type == "early")
+            community.registerEarlyEvent(NULL, source, start, end);
+        else if (type == "late")
+            community.registerLateEvent(NULL, source, start, end);
+    }
+}
+
+// Update schedule_events to use the new add_split_event
+function (void)schedule_events(object<Dictionary>$ model, object<Dictionary>$ pops, float time_bounds) {
+  demes = get_demes(model);
+  events = Dictionary();
+
+  for (i in seqLen(size(demes))) {
+    deme = demes[i];
+
+    if (has_ancestors(deme)) {
+      add_split_event(events, deme, pops, time_bounds);
+    }
+  }
+
+  debug_events(events);
+  register_events(events);
+}
+
+
+// Print out events.
+function (void)debug_events(object<Dictionary>$ events) {
+    if (!dictContains(events, "start"))
+        return;
+
+    catn("\n--- debug_events() ---\nEvents to be registered:");
+    starts = events.getValue("start");
+    ends = events.getValue("end");
+    types = events.getValue("type");
+    sources = events.getValue("source");
+
+    for (i in seqLen(size(starts))) {
+        catn("gen " + starts[i] + "-" + ends[i] + " " + types[i] + "():");
+        catn("    " + paste(strsplit(sources[i], "\n"), sep="\n    "));
+    }
+}
