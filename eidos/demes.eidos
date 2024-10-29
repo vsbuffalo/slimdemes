@@ -165,8 +165,8 @@ function (object<Dictionary>$)setup_populations(object<Dictionary>$ model, objec
       scaled_size = asInteger(initial_size / SCALING_FACTOR);
 
       // Create the population
-      sim.addSubpop(pop_id, scaled_size);
-      sim.subpopulations[pop_id].setValue("name", deme_name);
+      p = sim.addSubpop(pop_id, scaled_size);
+      p.name = deme_name;
       pops.setValue(pop_id, deme_name);
       pop_id = pop_id + 1;
     } else {
@@ -220,7 +220,8 @@ function (string$)build_split_script(string$ child_name, integer$ child_id,
     lines = c(
         "// " + child_name + ": split from " + ancestors[0],
         "sim.addSubpopSplit(" + child_id + ", " + start_size + ", " + ancestor_ids[0] + ");",
-        "sim.subpopulations[" + child_id + "].setValue(\"name\", \"" + child_name + "\");"
+        "p = sim.subpopulations[" + child_id + "];",
+        "p.name = \"" + child_name + "\";"
         );
     return paste(lines, sep="\n");
   } else {
@@ -232,7 +233,8 @@ function (string$)build_split_script(string$ child_name, integer$ child_id,
     lines = c(
         "// " + child_name + ": admixture of " + ancestor_str,
         "sim.addSubpop(" + child_id + ", " + start_size + ");",
-        "sim.subpopulations[" + child_id + "].setValue(\"name\", \"" + child_name + "\");",
+        "p = sim.subpopulations[" + child_id + "];",
+        "p.name = \"" + child_name + "\";",
         "sim.subpopulations[" + child_id + "].setMigrationRates(c(" + ancestor_ids_str + "), c(" + proportions_str + "));"
         );
     return paste(lines, sep="\n");

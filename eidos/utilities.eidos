@@ -36,7 +36,7 @@ function (void)print_progress_bar(integer$ total, integer$ refresh_rate, integer
     }
     bar = bar + ">";
 
-    // Add empty portion
+    // Add empty portio
     for (i in seqLen(bar_width - filled)) {
         bar = bar + "   ";
     }
@@ -54,3 +54,4 @@ function (void)print_progress_bar(integer$ total, integer$ refresh_rate, integer
         cat("");
     }
 }
+

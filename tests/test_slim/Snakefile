@@ -1,7 +1,6 @@
 import sys
-from pathlib import Path
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-import slimdemes  # Now should work
+import slimdemes
+from slimdemes.utilities import safe_float
 
 # Configuration
 configfile: "config/test_config.yaml"
@@ -10,39 +9,88 @@ configfile: "config/test_config.yaml"
 N_REPLICATES = config.get("n_replicates", 10)
 MODELS = config["models"]
 QS = config["rescale_qs"]
+NUM_SAMPLES = config["num_samples"]
 
 # Output directory
 OUTPUT_DIR = "test_outputs"
-
-# Rule to run all tests
-rule all:
-    input:
-        expand(model=MODELS, q=QS, replicate=range(N_REPLICATES))
 
 rule convert_demes_json:
     input: yml="../examples/{model}.yml"
     output: json="../examples/{model}_q{q}.json"
     run:
-        convert_demes_to_json(input.yml, output.json, ignore_gene_flow=True,
-                              rescale_q=wildcards.q, out=output.json)
-
+        rescale_q = safe_float(wildcards.q)
+        slimdemes.convert_demes_to_json(input_file=input.yml,
+                                        ignore_gene_flow=True,
+                                        rescale_q=rescale_q,
+                                        out=output.json)
 
 # Rule to run a single SLiM simulation
-rule run_slim_sim:
-    input: json="../examples/{model}_q{q}.json"
-    output:
-        f"{OUTPUT_DIR}/{{model}}_q{{q}}/slim_rep{{replicate}}.txt"
+rule run_slim:
+    input: json="../examples/{model}_q{q}.json", slim="test_sim.slim"
+    output: f"{OUTPUT_DIR}/{{model}}_q{{q}}/slim/rep{{replicate}}.trees"
+    params:
+        sequence_length=config["sequence_length"]
     shell:
         """
-        slim -d "demes_json={input.json}" -d "outfile='{output}'" -d "seed={wildcards.replicate}" scripts/test_sim.slim
+        slim -d "sequence_length={params.sequence_length}" \
+             -d "demes_json='{input.json}'" \
+             -d "outfile='{output}'" \
+             -d "seed={wildcards.replicate}" {input.slim}
         """
 
-## Rule to analyze results and generate test report
-#rule analyze_results:
-#    input:
-#        sims=expand(f"{OUTPUT_DIR}/slim_rep{{replicate}}.txt",
-#                    replicate=range(N_REPLICATES))
-#    output:
-#        report=f"{OUTPUT_DIR}/test_report.txt"
-#    script:
-#        "scripts/analyze_results.py"
+rule run_msprime:
+    input:
+        yml="../examples/{model}.yml"
+    output:
+        trees=f"{OUTPUT_DIR}/{{model}}_q{{q}}/msprime/n_{{num_samples}}/rep{{replicate}}.trees"
+    params:
+        sequence_length = config["sequence_length"],
+    run:
+        rescale_q = safe_float(wildcards.q)
+        import slimdemes
+        output_dir = Path(output.trees).parent
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        slimdemes.run_demes_msprime(
+            input_file=Path(input.yml),
+            ignore_gene_flow=True,
+            rescale_q=rescale_q,
+            num_samples=int(wildcards.num_samples),
+            sequence_length=int(params.sequence_length),
+            random_seed=int(wildcards.replicate),
+            out=Path(output.trees)
+        )
+
+rule compare_sims:
+    input:
+        slim_trees=expand(rules.run_slim.output,
+                          model=MODELS, q=QS, replicate=list(range(N_REPLICATES))),
+        msp_trees=expand(rules.run_msprime.output,
+                         num_samples=NUM_SAMPLES,
+                         model=MODELS, q=QS, replicate=list(range(N_REPLICATES)))
+    output:
+        stats=f"{OUTPUT_DIR}/{{model}}_q{{q}}/n_{{num_samples}}/comparison_stats.csv",
+        plot=f"{OUTPUT_DIR}/{{model}}_q{{q}}/n_{{num_samples}}/comparison_plot.pdf"
+    params:
+        sequence_length = config["sequence_length"],
+        num_samples = config["num_samples"],
+    run:
+        from slimdemes.testing import compare_sims, plot_comparison
+        rescale_q = wildcards.q
+
+        stats_df = compare_sims(
+            sim_dir=OUTPUT_DIR,
+            model=wildcards.model,
+            rescale_q=rescale_q,
+            num_samples=int(wildcards.num_samples),
+            replicates=N_REPLICATES
+        )
+        stats_df.write_csv(output.stats)
+        plot_comparison(stats_df, output.plot)
+
+rule all:
+    input:
+        expand(rules.run_slim.output, model=MODELS, q=QS, replicate=list(range(N_REPLICATES))),
+        expand(rules.run_msprime.output, model=MODELS, q=QS, num_samples=NUM_SAMPLES, replicate=list(range(N_REPLICATES))),
+        expand(f"{OUTPUT_DIR}/{{model}}_q{{q}}/n_{{num_samples}}/comparison_stats.csv", num_samples=NUM_SAMPLES, model=MODELS, q=QS),
+        expand(f"{OUTPUT_DIR}/{{model}}_q{{q}}/n_{{num_samples}}/comparison_plot.pdf", num_samples=NUM_SAMPLES, model=MODELS, q=QS)

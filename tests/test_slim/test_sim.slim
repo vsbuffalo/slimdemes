@@ -1,0 +1,52 @@
+initialize() {
+  source("../../eidos/demes.eidos");
+  source("../../eidos/utilities.eidos");
+  // defineConstant("BURNIN", 10.0);
+  defineConstant("SCALING_FACTOR", 10.0);
+  defineConstant("MUTATION_RATE", 0);
+  defineConstant("RECOMBINATION_RATE", 1e-8);
+  defineConstant("CONTIG_LENGTH", 10000);
+  defineConstant("TREES_FILE", outfile);
+
+  // Initialize with metadata
+  initializeTreeSeq(timeUnit = "generations");
+
+  initializeMutationRate(SCALING_FACTOR * MUTATION_RATE);
+  initializeMutationType("m1", 0.5, "f", 0.0);
+  initializeGenomicElementType("g1", m1, 1.0);
+  initializeGenomicElement(g1, 0, CONTIG_LENGTH - 1);
+
+  // Calculate scaled recombination rate
+  scaled_rate = (1 - (1 - 2 * RECOMBINATION_RATE)^SCALING_FACTOR) / 2;
+
+  // Set up recombination rate in the format expected by SLiM/msprime
+  // For a single rate, we still need to specify the end position
+  defineConstant("recombination_rates", scaled_rate);
+  defineConstant("recombination_ends", CONTIG_LENGTH - 1); // ends are inclusive in SLiM
+  defineConstant("recombination_map", Dictionary(
+          "rates", recombination_rates,
+          "ends", recombination_ends));
+  print(recombination_map);
+  initializeRecombinationRate(recombination_rates, recombination_ends);
+}
+
+1 early() {
+    model = load_demes();
+    end_gen = get_model_end_time(model);
+    community.rescheduleScriptBlock(s2, end_gen, end_gen);
+}
+
+1: late() {
+    print_progress_bar(SIM_END_TIME, 10, community.tick);
+}
+
+s2 late() {
+  // Create metadata including recombination map info
+  metadata = Dictionary(
+      "scaling_factor", SCALING_FACTOR,
+      "mutation_rate", MUTATION_RATE,
+      "contig_length", CONTIG_LENGTH,
+      "demes_json", demes_json,
+      "recombination_map", recombination_map);
+  sim.treeSeqOutput(TREES_FILE, metadata=metadata);
+}
