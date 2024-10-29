@@ -14,22 +14,25 @@ function (void)assert_in_generations(object<Dictionary>$ model) {
   }
 }
 
-function (object<Dictionary>$)load_demes(void) {
-  assert_wf();
-  if (!exists("demes_json")) {
-    stop("must define JSON demes file with -d demes_file=\\\"<model.json>\\\"");
-  }
-  model_lines = readFile(demes_json);
-  model_string = paste(model_lines, sep="\n");
-  model = Dictionary(model_string);
-  assert_in_generations(model);
-  time_bounds = event_time_bounds(model);
-  print(time_bounds);
-  pops = setup_populations(model, time_bounds);
-  print(pops);
-  schedule_events(model, pops, time_bounds);
-  // validate_demes(model);
-  return model;
+// Load the demes model into SLiM by:
+// 1) Setting up ancestral populations
+// 2) Scheduling events that create populations from splits
+//     from these ancestral populations.
+function (object<Dictionary>$)load_demes([float$ burn_in = 0.0]) {
+    assert_wf();
+    if (!exists("demes_json")) {
+        stop("must define JSON demes file with -d demes_file=\\\"<model.json>\\\"");
+    }
+    model_lines = readFile(demes_json);
+    model_string = paste(model_lines, sep="\n");
+    model = Dictionary(model_string);
+    assert_in_generations(model);
+    bounds = event_time_bounds(model, burn_in);
+    print(bounds);
+    pops = setup_populations(model, bounds);
+    print(pops);
+    schedule_events(model, pops, bounds);
+    return model;
 }
 
 // Accessor function to get the demes out of a collection of demes.
@@ -75,29 +78,35 @@ function (float)get_epoch_end(object$ epoch) {
 }
 
 // Return the time bounds of the demes model.
-function (float)event_time_bounds(object<Dictionary>$ model) {
-  t_max = 0.0;
-  t_min = INF;
-  demes = get_demes(model);
+function (object<Dictionary>$)event_time_bounds(object<Dictionary>$ model, [float$ burn_in = 0.0]) {
+    t_max = 0.0;
+    t_min = INF;
+    demes = get_demes(model);
 
-  for (i in seqLen(size(demes))) {
-    deme = demes[i];
-    epochs = get_epochs(deme);
+    for (i in seqLen(size(demes))) {
+        deme = demes[i];
+        epochs = get_epochs(deme);
 
-    for (j in seqLen(size(epochs))) {
-      epoch = epochs[j];
-      start_time = get_epoch_start(epoch, deme, j);
-      end_time = get_epoch_end(epoch);
+        for (j in seqLen(size(epochs))) {
+            epoch = epochs[j];
+            start_time = get_epoch_start(epoch, deme, j);
+            end_time = get_epoch_end(epoch);
 
-      if (!isInfinite(start_time)) {
-        t_max = max(t_max, start_time);
-      }
-      t_max = max(t_max, end_time);
-      t_min = min(t_min, end_time);
+            if (!isInfinite(start_time)) {
+                t_max = max(t_max, start_time);
+            }
+            t_max = max(t_max, end_time);
+            t_min = min(t_min, end_time);
+        }
     }
-  }
-  assert(t_max > t_min);
-  return c(t_max, t_min);
+    assert(t_max > t_min);
+
+    // Create dictionary with min, max, and burn_in
+    bounds = Dictionary();
+    bounds.setValue("min", t_min);
+    bounds.setValue("max", t_max);
+    bounds.setValue("burn_in", burn_in);
+    return bounds;
 }
 
 // Get the population size of an epoch.
@@ -125,33 +134,34 @@ function (float)get_epoch_size(object$ epoch, object<Dictionary>$ deme, integer$
 // Set up initial populations based on the earliest epoch of each deme
 // This will return dictionary that maps the population
 // integer IDs to the deme names.
-function (object<Dictionary>$)setup_populations(object<Dictionary>$ model, float time_bounds) {
-  demes = get_demes(model);
-  pop_id = 0;  // Start from 0 to match expected indices
-  pops = Dictionary();
+function (object<Dictionary>$)setup_populations(object<Dictionary>$ model, object<Dictionary>$ bounds) {
+    demes = get_demes(model);
+    pop_id = 0;  // Start from 0 to match expected indices
+    pops = Dictionary();
 
-  for (i in seqLen(size(demes))) {
-    deme = demes[i];
-    deme_name = deme.getValue("name");
+    for (i in seqLen(size(demes))) {
+        deme = demes[i];
+        deme_name = deme.getValue("name");
 
-    // Only create populations that don't have ancestors
-    if (!has_ancestors(deme)) {
-      epochs = get_epochs(deme);
-      first_epoch = epochs[0];
-      // Get initial population size
-      initial_size = get_epoch_size(first_epoch, deme, i);
-      scaled_size = asInteger(initial_size / SCALING_FACTOR);
-      // Create the population
-      sim.addSubpop(pop_id, scaled_size);
-      sim.subpopulations[pop_id].setValue("name", deme_name);
-      pops.setValue(pop_id, deme_name);
-      pop_id = pop_id + 1;
-    } else {
-      // Still add to pops dictionary with same index scheme
-      pops.setValue(i, deme_name);
+        // Only create populations that don't have ancestors
+        if (!has_ancestors(deme)) {
+            epochs = get_epochs(deme);
+            first_epoch = epochs[0];
+            // Get initial population size
+            initial_size = get_epoch_size(first_epoch, deme, i);
+            scaled_size = asInteger(initial_size / SCALING_FACTOR);
+
+            // Create the population
+            sim.addSubpop(pop_id, scaled_size);
+            sim.subpopulations[pop_id].setValue("name", deme_name);
+            pops.setValue(pop_id, deme_name);
+            pop_id = pop_id + 1;
+        } else {
+            // Still add to pops dictionary with same index scheme
+            pops.setValue(i, deme_name);
+        }
     }
-  }
-  return pops;
+    return pops;
 }
 
 // Check if a deme has ancestors
@@ -177,13 +187,13 @@ function (float)get_ancestor_proportions(object<Dictionary>$ deme) {
 
 
 // Convert from backwards time (in demes) to forwards time (in SLiM)
-function (integer$)get_tick_from_demes_time(float$ demes_time, float time_bounds) {
-    // time_bounds[0] is t_max (most ancient finite time)
-    // time_bounds[1] is t_min (most recent time)
-    model_duration = time_bounds[0] - time_bounds[1];
+function (integer$)get_tick_from_demes_time(float$ demes_time, object<Dictionary>$ bounds) {
+    // Following spec: f = b + d - t
+    // where b is burn_in, d is model duration (max-min), t is backwards time
+    model_duration = bounds.getValue("max") - bounds.getValue("min");
+    burn_in = bounds.getValue("burn_in");
 
-    // Using f = d - t formula from spec, adding 1 for SLiM's 1-based ticks
-    tick = asInteger(model_duration - demes_time) + 1;
+    tick = asInteger(burn_in + model_duration - demes_time) + 1; // +1 for SLiM's 1-based ticks
     return tick;
 }
 
@@ -216,7 +226,7 @@ function (string$)build_split_script(string$ child_name, integer$ child_id,
 }
 
 // Register a population split when a deme has ancestors.
-function (void)add_split_event(object<Dictionary>$ events, object<Dictionary>$ deme, object<Dictionary>$ pops, float time_bounds) {
+function (void)add_split_event(object<Dictionary>$ events, object<Dictionary>$ deme, object<Dictionary>$ pops, object<Dictionary>$ bounds) {
     // Get deme info
     name = deme.getValue("name");
     ancestors = deme.getValue("ancestors");
@@ -252,9 +262,8 @@ function (void)add_split_event(object<Dictionary>$ events, object<Dictionary>$ d
 
     // Convert deme start time to SLiM tick
     deme_time = asFloat(deme.getValue("start_time"));
-    tick = get_tick_from_demes_time(deme_time, time_bounds);
+    tick = get_tick_from_demes_time(deme_time, bounds);
 
-    // Build and add the script
     source = build_split_script(name, child_id, ancestors, ancestor_ids, proportions, start_size);
     add_event(events, source, tick);
 }
@@ -326,22 +335,22 @@ function (void)register_events(object<Dictionary>$ events) {
 }
 
 // Update schedule_events to use the new add_split_event
-function (void)schedule_events(object<Dictionary>$ model, object<Dictionary>$ pops, float time_bounds) {
-  demes = get_demes(model);
-  events = Dictionary();
+function (void)schedule_events(object<Dictionary>$ model, object<Dictionary>$ pops,
+                             object<Dictionary>$ bounds) {
+    demes = get_demes(model);
+    events = Dictionary();
 
-  for (i in seqLen(size(demes))) {
-    deme = demes[i];
+    for (i in seqLen(size(demes))) {
+        deme = demes[i];
 
-    if (has_ancestors(deme)) {
-      add_split_event(events, deme, pops, time_bounds);
+        if (has_ancestors(deme)) {
+            add_split_event(events, deme, pops, bounds);
+        }
     }
-  }
 
-  debug_events(events);
-  register_events(events);
+    debug_events(events);
+    register_events(events);
 }
-
 
 // Print out events.
 function (void)debug_events(object<Dictionary>$ events) {
