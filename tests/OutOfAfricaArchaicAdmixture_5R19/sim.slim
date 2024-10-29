@@ -1,5 +1,6 @@
 initialize() {
   source("eidos/demes.eidos");
+  source("eidos/utilities.eidos");
 
   // defineConstant("BURNIN", 10.0);
   defineConstant("SCALING_FACTOR", 10.0);
@@ -19,8 +20,14 @@ initialize() {
 
 1 early() {
     model = load_demes();
+
+    end_gen = get_model_end_time(model);
+    community.rescheduleScriptBlock(s2, end_gen, end_gen);
 }
 
-s1 late() {
+1: late() {
+    print_progress_bar(SIM_END_TIME, 10, community.tick);
+}
+s2 late() {
     sim.treeSeqOutput(TREES_FILE);
 }

@@ -1,0 +1,56 @@
+// Utilities
+
+// Prints a progress bar with percentage complete
+// total: total number of generations to run
+// refresh_rate: how often to update the bar (e.g., every 10 generations)
+// current: current generation number
+// Returns: void, prints progress bar to console
+function (void)print_progress_bar(integer$ total, integer$ refresh_rate, integer$ current) {
+    if (current % refresh_rate != 0) {
+        return;
+    }
+
+    // Calculate percentage
+    percentage = asInteger((current * 100.0) / total);
+
+    // Calculate number of bar segments (using 20 segments total)
+    bar_width = 20;
+    filled = asInteger((current * bar_width) / total);
+
+    // Build progress bar string
+    bar = "";
+
+    // Add percentage with padding
+    if (percentage < 10) {
+        bar = bar + "  " + percentage;
+    } else if (percentage < 100) {
+        bar = bar + " " + percentage;
+    } else {
+        bar = bar + percentage;
+    }
+    bar = bar + "% [";
+
+    // Add filled portion
+    for (i in seqLen(filled)) {
+        bar = bar + "===";
+    }
+    bar = bar + ">";
+
+    // Add empty portion
+    for (i in seqLen(bar_width - filled)) {
+        bar = bar + "   ";
+    }
+
+    bar = bar + "]";
+
+    // Add current/total
+    bar = bar + " " + current + "/" + total;
+
+    // Print with carriage return to overwrite previous line
+    cat("\r" + bar + "\r");
+
+    // Print newline when complete
+    if (current == total) {
+        cat("");
+    }
+}
