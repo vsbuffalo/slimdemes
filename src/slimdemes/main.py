@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Optional
 
 import demes
+from moments.Demes.DemesUtil import rescale as rescale_demes
 import defopt
 import yaml
 
@@ -54,12 +55,14 @@ def convert(
     input_file: Path,
     *,
     ignore_gene_flow: Optional[bool] = False,
+    rescale_q: Optional[float] = None,
     out: Optional[Path] = None,
 ) -> None:
     """Convert YAML file to JSON.
     Args:
         input_file: Input YAML file path
         ignore_gene_flow: Remove gene flow blocks (pulses and migrations).
+        rescale_q: The scaling factor, e.g. setting q = 0.1 reduces popsizes by a factor of 1/q.
         out: Optional output JSON file path. If not provided, writes to stdout
     """
     graph = load_demes(
@@ -67,6 +70,12 @@ def convert(
         ignore_gene_flow=ignore_gene_flow,
         convert_to_generations=True,
     )
+
+    # rescale if necessary
+    if rescale_q is not None:
+        assert rescale_q <= 1.0, "q in --rescale-q must be <= 1.0"
+        graph = rescale_demes(graph, rescale_q)
+
     data = graph.asdict()
 
     # Convert float('inf') to "Infinity" string
@@ -80,6 +89,10 @@ def convert(
         return obj
 
     data = convert_infinity(data)
+
+    # Include the rescaling factor so it can be used downstream
+    data["rescaling_q"] = rescale_q
+
     # Use ensure_ascii=False to handle any special characters
     json_str = json.dumps(data, indent=2, ensure_ascii=False)
 

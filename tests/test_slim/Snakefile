@@ -1,0 +1,48 @@
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+import slimdemes  # Now should work
+
+# Configuration
+configfile: "config/test_config.yaml"
+
+# Number of replicates to run
+N_REPLICATES = config.get("n_replicates", 10)
+MODELS = config["models"]
+QS = config["rescale_qs"]
+
+# Output directory
+OUTPUT_DIR = "test_outputs"
+
+# Rule to run all tests
+rule all:
+    input:
+        expand(model=MODELS, q=QS, replicate=range(N_REPLICATES))
+
+rule convert_demes_json:
+    input: yml="../examples/{model}.yml"
+    output: json="../examples/{model}_q{q}.json"
+    run:
+        convert_demes_to_json(input.yml, output.json, ignore_gene_flow=True,
+                              rescale_q=wildcards.q, out=output.json)
+
+
+# Rule to run a single SLiM simulation
+rule run_slim_sim:
+    input: json="../examples/{model}_q{q}.json"
+    output:
+        f"{OUTPUT_DIR}/{{model}}_q{{q}}/slim_rep{{replicate}}.txt"
+    shell:
+        """
+        slim -d "demes_json={input.json}" -d "outfile='{output}'" -d "seed={wildcards.replicate}" scripts/test_sim.slim
+        """
+
+## Rule to analyze results and generate test report
+#rule analyze_results:
+#    input:
+#        sims=expand(f"{OUTPUT_DIR}/slim_rep{{replicate}}.txt",
+#                    replicate=range(N_REPLICATES))
+#    output:
+#        report=f"{OUTPUT_DIR}/test_report.txt"
+#    script:
+#        "scripts/analyze_results.py"

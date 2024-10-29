@@ -1,0 +1,5 @@
+n_replicates: 10
+models:
+  - "OutOfAfricaArchaicAdmixture_5R19/OutOfAfricaArchaicAdmixture_5R19"
+rescale_qs: [null, 0.1, 0.5]
+
