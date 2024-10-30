@@ -1,11 +1,12 @@
 import sys
 import slimdemes
 from slimdemes.utilities import safe_float
+from slimdemes.testing import mimic_slimsim_with_msprime
 
 # Configuration
 configfile: "config/test_config.yaml"
 
-# Number of replicates to run
+# Parameters, etc
 N_REPLICATES = config.get("n_replicates", 10)
 MODELS = config["models"]
 QS = config["rescale_qs"]
@@ -40,23 +41,16 @@ rule run_slim:
 
 rule run_msprime:
     input:
-        yml="../examples/{model}.yml"
+        slim_trees=f"{OUTPUT_DIR}/{{model}}_q{{q}}/slim/rep{{replicate}}.trees"
     output:
         trees=f"{OUTPUT_DIR}/{{model}}_q{{q}}/msprime/n_{{num_samples}}/rep{{replicate}}.trees"
-    params:
-        sequence_length = config["sequence_length"],
     run:
-        rescale_q = safe_float(wildcards.q)
-        import slimdemes
         output_dir = Path(output.trees).parent
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        slimdemes.run_demes_msprime(
-            input_file=Path(input.yml),
-            ignore_gene_flow=True,
-            rescale_q=rescale_q,
+        mimic_slimsim_with_msprime(
+            slim_ts_path=Path(input.slim_trees),
             num_samples=int(wildcards.num_samples),
-            sequence_length=int(params.sequence_length),
             random_seed=int(wildcards.replicate),
             out=Path(output.trees)
         )

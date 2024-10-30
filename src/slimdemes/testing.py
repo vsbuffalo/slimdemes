@@ -4,6 +4,8 @@ import polars as pl
 import tskit
 import msprime
 import pyslim
+from pathlib import Path
+from typing import Optional
 import matplotlib.pyplot as plt
 import matplotlib
 from slimdemes.demes import load_demes_json
@@ -55,7 +57,13 @@ def recapitate_if_needed(ts, random_seed=None):
         print(f"Recapitating {num_uncoalesced} uncoalesced trees...")
 
         # Get recombination rate from metadata
-        slim_md = ts.metadata["SLiM"]["user_metadata"]
+        try:
+            slim_md = ts.metadata["SLiM"]["user_metadata"]
+        except IndexError:
+            raise IndexError(
+                "Metadata entry 'SLiM' > 'user_metadata' not found, "
+                "is this a SLiM tree sequence?"
+            )
         recmap = slim_md["recombination_map"][0]
         recomb_rates = recmap["rates"]
         recomb_ends = recmap["ends"]
@@ -89,6 +97,81 @@ def recapitate_if_needed(ts, random_seed=None):
     return ts
 
 
+def mimic_slimsim_with_msprime(
+    slim_ts_path: Path,
+    *,
+    num_samples: Optional[int] = 10,
+    random_seed: Optional[int] = None,
+    out: Optional[Path] = None,
+) -> None:
+    """Run msprime simulation matching parameters from a SLiM tree sequence.
+
+    Args:
+        slim_ts_path: Path to SLiM tree sequence file to match parameters from
+        num_samples: The number of samples to draw from each present-day deme
+        random_seed: Random seed for reproducibility
+        out: Output tree sequence file path (.trees)
+    """
+    # Load SLiM tree sequence to get metadata
+    slim_ts = tskit.load(slim_ts_path)
+    slim_md = slim_ts.metadata["SLiM"]["user_metadata"]
+
+    # Load demographic model from metadata
+    if "demes_json" not in slim_md:
+        raise ValueError("'demes_json' must be in SLiM metadata")
+
+    graph = load_demes_json(slim_md["demes_json"][0])
+    demography = msprime.Demography.from_demes(graph)
+
+    # Get recombination map from metadata
+    if "recombination_map" not in slim_md:
+        raise ValueError("'recombination_map' must be in SLiM metadata")
+
+    recmap = slim_md["recombination_map"][0]
+    recomb_rates = recmap["rates"]
+    recomb_ends = recmap["ends"]
+
+    # If there's just one rate, use that
+    if len(recomb_rates) == 1:
+        recomb_rate = recomb_rates[0]
+    else:
+        # Create recombination map if multiple rates
+        positions = [0] + recomb_ends
+        rates = recomb_rates + [recomb_rates[-1]]  # repeat last rate
+        recomb_rate = msprime.RateMap(position=positions, rate=rates)
+
+    # Get sequence length (note that slim returns arrays...)
+    sequence_length = slim_md["contig_length"][0]
+
+    # Set up sampling - similar to run_msprime but using max time
+    samples = []
+    for deme in graph.demes:
+        if deme.end_time == 0:
+            # sample from extent lineages only
+            samples.extend(
+                [msprime.SampleSet(num_samples, population=deme.name, time=0)]
+            )
+
+    # Run simulation
+    ts = msprime.sim_ancestry(
+        samples=samples,
+        demography=demography,
+        sequence_length=sequence_length,
+        recombination_rate=recomb_rate,
+        random_seed=None if random_seed is None else random_seed + 1,
+    )
+
+    # Save tree sequence
+    if out:
+        ts.dump(out)
+    else:
+        # Print summary statistics if no output file specified
+        print("Tree sequence statistics:")
+        print(f"Number of trees: {ts.num_trees}")
+        print(f"Sample size: {ts.num_samples}")
+        print(f"Sequence length: {ts.sequence_length}")
+
+
 def analyze_trees(ts_path, subsample_size=None, random_seed=None):
     """
     Analyze a tree sequence file and compute population genetic statistics
@@ -108,31 +191,11 @@ def analyze_trees(ts_path, subsample_size=None, random_seed=None):
 
     # Subsample if specified
     if subsample_size is not None:
-        rng = np.random.default_rng(random_seed)
-
-        # Group samples by population
-        samples_by_pop = {}
-        for node in ts.nodes():
-            if node.time == 0:  # Only sample from present-day individuals
-                pop = node.population
-                if pop not in samples_by_pop:
-                    samples_by_pop[pop] = []
-                samples_by_pop[pop].append(node.id)
-
-        # Subsample from each population
-        subsampled_ids = []
-        sample_sets = {}
-        for pop, samples in samples_by_pop.items():
-            if len(samples) < subsample_size:
-                raise ValueError(
-                    f"Population {pop} has fewer samples ({len(samples)}) "
-                    f"than requested subsample size ({subsample_size})"
-                )
-            pop_samples = rng.choice(samples, size=subsample_size, replace=False)
-            subsampled_ids.extend(pop_samples)
-            sample_sets[pop] = list(pop_samples)
-
-        ts = ts.simplify(subsampled_ids)
+        num_samples = {"YRI": 10, "CEU": 10, "CHB": 10}
+        samples = []
+        for deme_name, n in num_samples.items():
+            samples.extend([msprime.SampleSet(n, population=deme_name, time=0)])
+        ts = ts.simplify(samples=samples)
 
     # Basic diversity statistics
     stats = {
