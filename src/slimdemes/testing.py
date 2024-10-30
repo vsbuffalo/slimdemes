@@ -195,7 +195,10 @@ def analyze_trees(ts_path, subsample_size=None, random_seed=None):
         sample_individuals = subsample_by_population(
             ts, subsample_size, seed=random_seed
         )
-        ts = ts.simplify(samples=individuals_to_nodes(ts, sample_individuals))
+        ts = ts.simplify(
+            samples=individuals_to_nodes(ts, sample_individuals),
+            filter_populations=False,
+        )
 
     # Basic diversity statistics
     stats = {
@@ -214,7 +217,7 @@ def analyze_trees(ts_path, subsample_size=None, random_seed=None):
         pop_samples = [
             node.id for node in ts.nodes() if node.time == 0 and node.population == pop
         ]
-        pop_ts = ts.simplify(pop_samples)
+        pop_ts = ts.simplify(pop_samples, filter_populations=False)
         stats[f"diversity_pop{pop}"] = pop_ts.diversity(mode="branch")
 
     # Compute FST between all population pairs
