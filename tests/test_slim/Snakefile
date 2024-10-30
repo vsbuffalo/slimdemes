@@ -55,7 +55,9 @@ rule run_msprime:
             out=Path(output.trees)
         )
 
-rule compare_sims:
+
+# Rule to generate and save comparison statistics
+rule generate_comparison_stats:
     input:
         slim_trees=expand(rules.run_slim.output,
                           model=MODELS, q=QS, replicate=list(range(N_REPLICATES))),
@@ -64,27 +66,69 @@ rule compare_sims:
                          model=MODELS, q=QS, replicate=list(range(N_REPLICATES)))
     output:
         stats=f"{OUTPUT_DIR}/{{model}}_q{{q}}/n_{{num_samples}}/comparison_stats.csv",
-        plot=f"{OUTPUT_DIR}/{{model}}_q{{q}}/n_{{num_samples}}/comparison_plot.pdf"
-    params:
-        sequence_length = config["sequence_length"],
-        num_samples = config["num_samples"],
+        afs=f"{OUTPUT_DIR}/{{model}}_q{{q}}/n_{{num_samples}}/afs_data.npy"
     run:
-        from slimdemes.testing import compare_sims, plot_comparison
-        rescale_q = wildcards.q
+        from slimdemes.testing import compare_sims
+        import numpy as np
 
+        # Generate comparison stats
         stats_df = compare_sims(
             sim_dir=OUTPUT_DIR,
             model=wildcards.model,
-            rescale_q=rescale_q,
+            rescale_q=wildcards.q,
             num_samples=int(wildcards.num_samples),
             replicates=N_REPLICATES
         )
-        stats_df.write_csv(output.stats)
-        plot_comparison(stats_df, output.plot)
 
+        # Extract AFS data and save separately as numpy array
+        afs_data = np.array([np.array(afs) for afs in stats_df['afs']])
+        np.save(output.afs, afs_data)
+
+        # Save other stats to CSV after dropping AFS column
+        stats_df.drop('afs').write_csv(output.stats)
+
+# Rule to create regular statistics comparison plot
+rule plot_comparison_stats:
+    input:
+        stats=rules.generate_comparison_stats.output.stats
+    output:
+        plot=f"{OUTPUT_DIR}/{{model}}_q{{q}}/n_{{num_samples}}/comparison_plot_stats.pdf"
+    run:
+        from slimdemes.testing import plot_stats_comparison
+        import polars as pl
+
+        # Read stats and create plot
+        stats_df = pl.read_csv(input.stats)
+        plot_stats_comparison(stats_df, output.plot)
+
+# Rule to create AFS comparison plot
+rule plot_afs_comparison:
+    input:
+        stats=rules.generate_comparison_stats.output.stats,
+        afs=rules.generate_comparison_stats.output.afs
+    output:
+        plot=f"{OUTPUT_DIR}/{{model}}_q{{q}}/n_{{num_samples}}/comparison_plot_afs.pdf"
+    run:
+        from slimdemes.testing import plot_afs_comparison
+        import polars as pl
+        import numpy as np
+
+        # Read stats and AFS data
+        stats_df = pl.read_csv(input.stats)
+        afs_data = np.load(input.afs)
+
+        # Add AFS back to DataFrame
+        stats_df = stats_df.with_columns(pl.Series("afs", afs_data.tolist()))
+
+        # Create plot
+        plot_afs_comparison(stats_df, output.plot)
+
+# Update the all rule to include all outputs
 rule all:
     input:
         expand(rules.run_slim.output, model=MODELS, q=QS, replicate=list(range(N_REPLICATES))),
         expand(rules.run_msprime.output, model=MODELS, q=QS, num_samples=NUM_SAMPLES, replicate=list(range(N_REPLICATES))),
-        expand(f"{OUTPUT_DIR}/{{model}}_q{{q}}/n_{{num_samples}}/comparison_stats.csv", num_samples=NUM_SAMPLES, model=MODELS, q=QS),
-        expand(f"{OUTPUT_DIR}/{{model}}_q{{q}}/n_{{num_samples}}/comparison_plot.pdf", num_samples=NUM_SAMPLES, model=MODELS, q=QS)
+        expand(rules.generate_comparison_stats.output.stats, num_samples=NUM_SAMPLES, model=MODELS, q=QS),
+        expand(rules.generate_comparison_stats.output.afs, num_samples=NUM_SAMPLES, model=MODELS, q=QS),
+        expand(rules.plot_comparison_stats.output.plot, num_samples=NUM_SAMPLES, model=MODELS, q=QS),
+        expand(rules.plot_afs_comparison.output.plot, num_samples=NUM_SAMPLES, model=MODELS, q=QS)

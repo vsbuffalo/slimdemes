@@ -208,7 +208,9 @@ def analyze_trees(ts_path, subsample_size=None, random_seed=None):
     }
 
     # Compute site frequency spectrum
-    afs = ts.allele_frequency_spectrum(polarised=True, span_normalise=False)
+    afs = ts.allele_frequency_spectrum(
+        polarised=True, span_normalise=False, mode="branch"
+    )
     stats["afs"] = afs
 
     # Compute per-population diversity and FST between all pairs
@@ -263,15 +265,12 @@ def compare_sims(sim_dir, model, rescale_q, num_samples, replicates):
                 )
             stats["rep"] = rep
             stats["sim_engine"] = sim_engine
-
-            afs = stats.pop("afs")
-
             rows.append(stats)
 
     return pl.DataFrame(rows)
 
 
-def plot_comparison(stats_df: pl.DataFrame, output_path=None):
+def plot_stats_comparison(stats_df: pl.DataFrame, output_path=None):
     """Plot comparison of statistics between SLiM and msprime using box plots
 
     Args:
@@ -310,6 +309,58 @@ def plot_comparison(stats_df: pl.DataFrame, output_path=None):
     # Hide any unused subplots
     for j in range(i + 1, len(axes)):
         axes[j].set_visible(False)
+
+    plt.tight_layout()
+    if output_path:
+        plt.savefig(output_path, dpi=300, bbox_inches="tight")
+    plt.close()
+
+
+def plot_afs_comparison(stats_df: pl.DataFrame, output_path=None):
+    """Plot comparison of Allele Frequency Spectrum between SLiM and msprime simulations
+    using pre-computed AFS from compare_sims
+
+    Args:
+        stats_df: Polars DataFrame containing 'afs' and 'sim_engine' columns
+        output_path: Optional path to save figure to
+    """
+    import matplotlib.pyplot as plt
+    import numpy as np
+
+    # Create figure
+    fig, ax = plt.subplots(figsize=(10, 6))
+
+    # Process AFS for each simulation type
+    for sim_engine, color in zip(["slim", "msprime"], ["blue", "orange"]):
+        # Get AFS arrays for this simulation type
+        afs_list = stats_df.filter(pl.col("sim_engine") == sim_engine)["afs"].to_list()
+
+        # Convert list of AFS to array
+        afs_array = np.array([afs[1:-1] for afs in afs_list])  # Exclude fixed variants
+
+        # Normalize each AFS
+        sums = afs_array.sum(axis=1, keepdims=True)
+        afs_array = afs_array / sums
+
+        # Calculate mean and standard deviation
+        mean_afs = np.mean(afs_array, axis=0)
+        std_afs = np.std(afs_array, axis=0)
+
+        # Create x-axis positions (allele counts)
+        x = np.arange(1, len(mean_afs) + 1)
+
+        # Plot mean and confidence interval
+        ax.plot(x, mean_afs, label=sim_engine, color=color)
+        ax.fill_between(
+            x, mean_afs - std_afs, mean_afs + std_afs, alpha=0.2, color=color
+        )
+
+    ax.set_xlabel("Allele count")
+    ax.set_ylabel("Proportion of variants")
+    ax.set_title("Allele Frequency Spectrum Comparison")
+    ax.legend()
+    ax.grid(True, linestyle="--", alpha=0.7)
+    ax.set_yscale("log")
 
     plt.tight_layout()
     if output_path:
