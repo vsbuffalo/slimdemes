@@ -9,6 +9,7 @@ from typing import Optional
 import matplotlib.pyplot as plt
 import matplotlib
 from slimdemes.demes import load_demes_json
+from slimdemes.utilities import subsample_by_population, individuals_to_nodes
 
 matplotlib.use("Agg")
 
@@ -191,11 +192,10 @@ def analyze_trees(ts_path, subsample_size=None, random_seed=None):
 
     # Subsample if specified
     if subsample_size is not None:
-        num_samples = {"YRI": 10, "CEU": 10, "CHB": 10}
-        samples = []
-        for deme_name, n in num_samples.items():
-            samples.extend([msprime.SampleSet(n, population=deme_name, time=0)])
-        ts = ts.simplify(samples=samples)
+        sample_individuals = subsample_by_population(
+            ts, subsample_size, seed=random_seed
+        )
+        ts = ts.simplify(samples=individuals_to_nodes(ts, sample_individuals))
 
     # Basic diversity statistics
     stats = {

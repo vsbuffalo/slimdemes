@@ -220,7 +220,7 @@ function (string$)build_split_script(string$ child_name, integer$ child_id,
     lines = c(
         "// " + child_name + ": split from " + ancestors[0],
         "sim.addSubpopSplit(" + child_id + ", " + start_size + ", " + ancestor_ids[0] + ");",
-        "p = sim.subpopulations[" + child_id + "];",
+        "p = p" + child_id + ";",  // Changed to use p notation
         "p.name = \"" + child_name + "\";"
         );
     return paste(lines, sep="\n");
@@ -228,14 +228,16 @@ function (string$)build_split_script(string$ child_name, integer$ child_id,
     assert(size(ancestors) > 1);
     // Multiple ancestor admixture
     ancestor_str = paste(ancestors, sep=", ");
-    ancestor_ids_str = paste(asString(ancestor_ids), sep=",");
+    // Convert ancestor IDs to p notation
+    ancestor_ids_p = sapply(ancestor_ids, "p" + asString(applyValue));
+    ancestor_ids_str = paste(ancestor_ids_p, sep=",");
     proportions_str = paste(asString(proportions), sep=",");
     lines = c(
         "// " + child_name + ": admixture of " + ancestor_str,
         "sim.addSubpop(" + child_id + ", " + start_size + ");",
-        "p = sim.subpopulations[" + child_id + "];",
+        "p = p" + child_id + ";",  // Changed to use p notation
         "p.name = \"" + child_name + "\";",
-        "sim.subpopulations[" + child_id + "].setMigrationRates(c(" + ancestor_ids_str + "), c(" + proportions_str + "));"
+        "p" + child_id + ".setMigrationRates(c(" + ancestor_ids_str + "), c(" + proportions_str + "));"
         );
     return paste(lines, sep="\n");
   }
@@ -285,12 +287,13 @@ function (void)add_split_event(object<Dictionary>$ events, object<Dictionary>$ d
 }
 
 // Build script string for population size change event
-function (string$)build_size_change_script(integer$ pop_id, float$ size, [string$ epoch_function = "constant"]) {
-    // For constant population sizes, just set the size directly
-    if (epoch_function == "constant") {
-        return "sim.subpopulations[" + pop_id + "].setSubpopulationSize(" + asInteger(size / SCALING_FACTOR) + ");";
+function (string$)build_size_change_script(integer$ pop_id, float$ size, [string$ description = ""]) {
+    desc = "";
+    if (nchar(description)) {
+      desc = "//" + description + "\n";
     }
-    stop("Unsupported size_function: " + epoch_function);
+    // Use p<id> notation instead of array indexing
+    return desc + "p" + pop_id + ".setSubpopulationSize(" + asInteger(size / SCALING_FACTOR) + ");";
 }
 
 // Calculate exponential growth rate and intermediate sizes
@@ -305,10 +308,10 @@ function (float$)get_exponential_size(float$ start_size, float$ end_size, float$
 
 // Add population size change events for an epoch
 function (void)add_size_change_events(object<Dictionary>$ events, integer$ pop_id,
-                                    float$ start_time, float$ end_time,
-                                    float$ start_size, float$ end_size,
-                                    string$ size_function,
-                                    object<Dictionary>$ time_bounds) {
+                                      float$ start_time, float$ end_time,
+                                      float$ start_size, float$ end_size,
+                                      string$ size_function,
+                                      object<Dictionary>$ time_bounds) {
     if (size_function == "constant") {
         // For constant size, we just need one event at the start
         if (!isInfinite(start_time)) {
@@ -327,6 +330,7 @@ function (void)add_size_change_events(object<Dictionary>$ events, integer$ pop_i
 
             // Calculate size at this time point
             size = get_exponential_size(start_size, end_size, start_time, end_time, t);
+            // TODO add description.
             source = build_size_change_script(pop_id, size);
             add_event(events, source, tick);
         }
@@ -341,13 +345,14 @@ function (void)add_all_size_change_events(object<Dictionary>$ events, object<Dic
 
     for (i in seqLen(size(demes))) {
         deme = demes[i];
+        deme_name = deme.getValue("name");
         epochs = get_epochs(deme);
 
         // Find the population ID for this deme
         pop_id = -1;
         keys = pops.allKeys;
         for (j in seqLen(size(keys))) {
-            if (pops.getValue(keys[j]) == deme.getValue("name")) {
+            if (pops.getValue(keys[j]) == deme_name) {
                 pop_id = asInteger(keys[j]);
                 break;
             }
@@ -355,16 +360,27 @@ function (void)add_all_size_change_events(object<Dictionary>$ events, object<Dic
         if (pop_id == -1) next;
 
         // Add size change events for each epoch
+        min_end_time = INF;
         for (j in seqLen(size(epochs))) {
             epoch = epochs[j];
             start_time = get_epoch_start(epoch, deme, j);
             end_time = get_epoch_end(epoch);
+            min_end_time = min(end_time, min_end_time);
             start_size = get_epoch_size(epoch, deme, j);
             end_size = asFloat(epoch.getValue("end_size"));
             size_function = epoch.getValue("size_function");
 
             add_size_change_events(events, pop_id, start_time, end_time,
-                                 start_size, end_size, size_function, time_bounds);
+                                   start_size, end_size, size_function, time_bounds);
+        }
+
+        // Schedule the population's extinction, if necessary
+        goes_extinct = min_end_time > 0;
+        if (goes_extinct) {
+            tick = get_tick_from_demes_time(min_end_time, time_bounds);
+            // size=0 triggers extinction
+            source = build_size_change_script(pop_id, 0.0, "Extinction of population " + deme_name);
+            add_event(events, source, tick);
         }
     }
 }
