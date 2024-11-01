@@ -10,8 +10,10 @@ from snakemake.settings.types import Quietness
 import polars as pl
 from scipy import stats
 
-# Significance level for statistical tests
-ALPHA = 0.05
+SNAKEFILE = Path("workflows/msprime_validation/Snakefile")
+WORKFLOW_DIR = SNAKEFILE.parent
+
+ALPHA = 0.05  # significant level for tests
 
 
 def get_workflow_rules(snakefile: Path) -> list[str]:
@@ -113,7 +115,6 @@ def run_snakemake(resource_settings):
         workflow_api = snakemake_api.workflow(
             snakefile=snakefile,
             resource_settings=resource_settings,
-            # config_settings=ConfigSettings(config=config_args),
             workdir=snakefile.parent,
         )
         all_targets = get_rule_all_targets(Path("Snakefile"))
@@ -124,34 +125,22 @@ def run_snakemake(resource_settings):
         dag_api.execute_workflow()
 
 
-@pytest.fixture()
-def stats_files():
-    """Create all the expected output files."""
-    return get_rule_all_targets(snakefile)
-
-
 # ----- main tests ------
-@pytest.fixture()
-def output_files(stats_files):
-    """Convert stats files to parameters for testing."""
-    return [pytest.param(Path(file), id=Path(file).name) for file in stats_files]
 
 
-@pytest.mark.parametrize("output_file", "output_files", indirect=True)
+@pytest.mark.parametrize("output_file", get_rule_all_targets(SNAKEFILE))
 def test_file_exists(output_file):
     """Test if each individual output file exists."""
-    assert output_file.exists(), f"Output file {output_file} was not created"
+    path = WORKFLOW_DIR / Path(output_file)
+    assert path.exists(), f"Output file {path} was not created"
 
 
 if __name__ == "__main__":
-    # For testing.
-    snakefile = Path("workflows/msprime_validation/Snakefile")
-
-    all_rules = get_workflow_rules(snakefile)
+    all_rules = get_workflow_rules(SNAKEFILE)
     print("All rules:", all_rules)
 
     # Get specific targets from 'all' rule
-    all_rule_targets = get_rule_all_targets(snakefile)
+    all_rule_targets = get_rule_all_targets(SNAKEFILE)
     print("Rule 'all' targets:", all_rule_targets)
 
     run_snakemake()

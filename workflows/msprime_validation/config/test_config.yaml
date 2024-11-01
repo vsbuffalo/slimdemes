@@ -1,7 +1,7 @@
-n_replicates: 20
+n_replicates: 50
 models:
   - "OutOfAfricaArchaicAdmixture_5R19"
-rescale_qs: [null]
+rescale_qs: [null, 10]
 sequence_length: 100000
 num_samples: [10]
 
