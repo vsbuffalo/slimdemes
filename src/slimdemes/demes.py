@@ -1,4 +1,4 @@
-import sys
+import warnings
 import json
 import demes
 import yaml
@@ -7,12 +7,34 @@ import yaml
 def remove_gene_flow(graph):
     msg = "Removing '{block}' from demes graph, " "since --ignore-gene-flow is set."
     if "pulses" in graph:
-        sys.stderr.write(msg.format(block="pulses"))
+        warnings.warn(msg.format(block="pulses"))
         graph.pop("pulses")
     if "migrations" in graph:
-        sys.stderr.write(msg.format(block="migrations"))
+        warnings.warn(msg.format(block="migrations"))
         graph.pop("migrations")
     return graph
+
+
+def check_deme_feature_support(graph):
+    """
+    Since we don't support all features, we do that here.
+    """
+    msg = "Demes {feature} are not yet supported."
+    if "pulses" in graph:
+        raise NotImplementedError(msg.format(feature="with pulses"))
+    if "migrations" in graph:
+        raise NotImplementedError(msg.format(feature="with migrations"))
+    print(graph)
+    for demes in graph["demes"]:
+        for epoch in demes["epochs"]:
+            if epoch.get("cloning_rate", 0.0) != 0.0:
+                raise NotImplementedError(
+                    msg.format(feature="epochs with cloning_rate ≠ 0.0")
+                )
+            if epoch.get("selfing_rate", 0.0) != 0.0:
+                raise NotImplementedError(
+                    msg.format(feature="epochs with cloning_rate ≠ 0.0")
+                )
 
 
 def load_demes(demes_file, ignore_gene_flow, convert_to_generations):
@@ -23,6 +45,7 @@ def load_demes(demes_file, ignore_gene_flow, convert_to_generations):
         data = remove_gene_flow(data)
 
     graph = demes.Graph.fromdict(data)
+    check_deme_feature_support(data)
 
     if convert_to_generations:
         graph = graph.in_generations()

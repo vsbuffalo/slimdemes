@@ -122,7 +122,7 @@ def convert(
 
 def main() -> None:
     """CLI entry point."""
-    defopt.run([convert, msprime])
+    defopt.run([convert, run_msprime])
 
 
 if __name__ == "__main__":

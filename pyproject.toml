@@ -20,5 +20,10 @@ dependencies = [
 ]
 
 [project.scripts]
-slimdemes = "slimdemes:main"
+slimdemes = "slimdemes.main:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3.3",
+]
 

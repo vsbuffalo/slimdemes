@@ -1,12 +1,12 @@
 import itertools
-import numpy as np
+import scipy
 import polars as pl
+import numpy as np
 import tskit
 import msprime
 import pyslim
 from pathlib import Path
 from typing import Optional
-import matplotlib.pyplot as plt
 import matplotlib
 from slimdemes.demes import load_demes_json
 from slimdemes.utilities import subsample_by_population, individuals_to_nodes
@@ -213,7 +213,7 @@ def analyze_trees(ts_path, subsample_size=None, random_seed=None):
     )
     stats["afs"] = afs
 
-    # Compute per-population diversity and FST between all pairs
+    # Compute per-population diversity and AFS
     populations = list(set(node.population for node in ts.nodes() if node.time == 0))
     for pop in populations:
         pop_samples = [
@@ -221,6 +221,11 @@ def analyze_trees(ts_path, subsample_size=None, random_seed=None):
         ]
         pop_ts = ts.simplify(pop_samples, filter_populations=False)
         stats[f"diversity_pop{pop}"] = pop_ts.diversity(mode="branch")
+
+        afs = pop_ts.allele_frequency_spectrum(
+            polarised=True, span_normalise=False, mode="branch"
+        )
+        stats[f"afs_pop{pop}"] = afs
 
     # Compute FST between all population pairs
     for pop1, pop2 in itertools.combinations(populations, 2):
@@ -270,24 +275,133 @@ def compare_sims(sim_dir, model, rescale_q, num_samples, replicates):
     return pl.DataFrame(rows)
 
 
-def plot_stats_comparison(stats_df: pl.DataFrame, output_path=None):
-    """Plot comparison of statistics between SLiM and msprime using box plots
+def compare_afs_distributions(afs1, afs2):
+    """Compare two allele frequency spectra using Kolmogorov-Smirnov test.
 
     Args:
-        stats_df: Polars DataFrame with statistics from compare_sims
+        afs1, afs2: Arrays containing allele frequency spectra
+
+    Returns:
+        tuple: (KS statistic, p-value)
+    """
+    from scipy import stats
+
+    # Normalize the spectra so we're comparing distributions
+    afs1_norm = afs1 / afs1.sum()
+    afs2_norm = afs2 / afs2.sum()
+
+    # Perform KS test
+    ks_stat, p_value = stats.ks_2samp(afs1_norm, afs2_norm)
+
+    return ks_stat, p_value
+
+
+def compute_comparison_stats(stats_df: pl.DataFrame):
+    """Compute statistical comparisons between SLiM and msprime results.
+
+    Args:
+        stats_df: DataFrame with statistics from compare_sims
+
+    Returns:
+        dict: Statistical test results for both regular stats and AFS
+    """
+    from scipy import stats
+    import numpy as np
+
+    results = {}
+
+    # Separate AFS columns from other statistics
+    afs_cols = [col for col in stats_df.columns if col.startswith("afs_pop")]
+    other_stat_cols = [
+        col
+        for col in stats_df.columns
+        if col not in ["rep", "sim_engine", "afs"] + afs_cols
+    ]
+
+    # Compute stats for regular statistics
+    for stat in other_stat_cols:
+        slim_values = stats_df.filter(pl.col("sim_engine") == "slim")[stat].to_numpy()
+        msp_values = stats_df.filter(pl.col("sim_engine") == "msprime")[stat].to_numpy()
+
+        # Perform t-test
+        t_stat, p_val = stats.ttest_ind(slim_values, msp_values)
+
+        results[stat] = {
+            "test_type": "t-test",
+            "test_stat": t_stat,
+            "p_value": p_val,
+            "slim_mean": np.mean(slim_values),
+            "msp_mean": np.mean(msp_values),
+            "relative_diff": abs(np.mean(slim_values) - np.mean(msp_values))
+            / np.mean(msp_values),
+            "significant": p_val < 0.05,
+        }
+
+    # Compute stats for AFS
+    for afs_col in afs_cols:
+        # Get mean AFS for each simulator
+        slim_afs_list = stats_df.filter(pl.col("sim_engine") == "slim")[
+            afs_col
+        ].to_list()
+        msp_afs_list = stats_df.filter(pl.col("sim_engine") == "msprime")[
+            afs_col
+        ].to_list()
+
+        slim_afs = np.mean(
+            np.array([np.array(afs[1:-1]) for afs in slim_afs_list]), axis=0
+        )
+        msp_afs = np.mean(
+            np.array([np.array(afs[1:-1]) for afs in msp_afs_list]), axis=0
+        )
+
+        # Chi-square test for AFS
+        chi2_stat, p_val = compare_afs_distributions(slim_afs, msp_afs)
+
+        results[afs_col] = {
+            "test_type": "chi-square",
+            "test_stat": chi2_stat,
+            "p_value": p_val,
+            "slim_mean": np.mean([np.sum(afs) for afs in slim_afs_list]),
+            "msp_mean": np.mean([np.sum(afs) for afs in msp_afs_list]),
+            "relative_diff": abs(np.sum(slim_afs) - np.sum(msp_afs)) / np.sum(msp_afs),
+            "significant": p_val < 0.05,
+        }
+
+    return results
+
+
+def plot_stats_comparison(stats_df: pl.DataFrame, test_results: dict, output_path=None):
+    """Plot comparison of statistics between SLiM and msprime using box plots.
+
+    Args:
+        stats_df: DataFrame with statistics from compare_sims
+        test_results: Dict of statistical test results from compute_comparison_stats
         output_path: Optional path to save figure to
     """
-    # Get statistics columns (exclude rep and sim_engine)
-    stat_cols = [col for col in stats_df.columns if col not in ["rep", "sim_engine"]]
+    import numpy as np
+    import matplotlib.pyplot as plt
 
-    # Calculate number of rows needed for subplots (2 columns)
-    n_rows = (len(stat_cols) + 1) // 2  # Round up division
+    # Separate AFS columns from other statistics
+    afs_cols = [col for col in stats_df.columns if col.startswith("afs_pop")]
+    other_stat_cols = [
+        col
+        for col in stats_df.columns
+        if col not in ["rep", "sim_engine", "afs"] + afs_cols
+    ]
 
-    fig, axes = plt.subplots(n_rows, 2, figsize=(12, 5 * n_rows))
+    # Calculate plot layout
+    n_stats = len(other_stat_cols)
+    n_afs = len(afs_cols)
+    total_plots = n_stats + n_afs
+    n_rows = (total_plots + 1) // 2
+
+    fig, axes = plt.subplots(n_rows, 2, figsize=(12, 4 * n_rows))
     axes = axes.flatten()
 
-    for i, stat in enumerate(stat_cols):
+    # Plot regular statistics
+    for i, stat in enumerate(other_stat_cols):
         ax = axes[i]
+        result = test_results[stat]
 
         # Get values for each simulation engine
         slim_values = stats_df.filter(pl.col("sim_engine") == "slim")[stat].to_numpy()
@@ -303,12 +417,46 @@ def plot_stats_comparison(stats_df: pl.DataFrame, output_path=None):
         ax.scatter(x_slim, slim_values, alpha=0.4, color="blue")
         ax.scatter(x_msp, msp_values, alpha=0.4, color="orange")
 
-        ax.set_title(stat)
+        # Add test results to plot title - color red if significant
+        title_color = "red" if result["significant"] else "black"
+        title = f"{stat}\n" f"t={result['test_stat']:.3f}, p={result['p_value']:.3f}"
+        ax.set_title(title, color=title_color)
         ax.grid(True, linestyle="--", alpha=0.7)
 
-    # Hide any unused subplots
-    for j in range(i + 1, len(axes)):
-        axes[j].set_visible(False)
+    # Plot AFS for each population
+    for j, afs_col in enumerate(afs_cols):
+        ax = axes[n_stats + j]
+        result = test_results[afs_col]
+
+        # Plot AFS for each simulation type
+        for sim_engine, color in zip(["slim", "msprime"], ["blue", "orange"]):
+            afs_list = stats_df.filter(pl.col("sim_engine") == sim_engine)[
+                afs_col
+            ].to_list()
+            afs_array = np.array([afs[1:-1] for afs in afs_list])
+            mean_afs = np.mean(afs_array, axis=0)
+
+            x = np.arange(1, len(mean_afs) + 1)
+            ax.plot(x, mean_afs, "-o", label=sim_engine, color=color, markersize=3)
+
+        ax.semilogx()
+        ax.set_xlabel("Allele count")
+        ax.set_ylabel("Number of variants")
+
+        # Add test results to plot title
+        title_color = "red" if result["significant"] else "black"
+        title = (
+            f"AFS Pop {afs_col.split('pop')[1]}\n"
+            f"χ²={result['test_stat']:.3f}, p={result['p_value']:.3f}"
+        )
+        ax.set_title(title, color=title_color)
+        ax.legend()
+        ax.grid(True, linestyle="--", alpha=0.7)
+        ax.set_yscale("log")
+
+    # Hide unused subplots
+    for k in range(n_stats + len(afs_cols), len(axes)):
+        axes[k].set_visible(False)
 
     plt.tight_layout()
     if output_path:
@@ -316,53 +464,27 @@ def plot_stats_comparison(stats_df: pl.DataFrame, output_path=None):
     plt.close()
 
 
-def plot_afs_comparison(stats_df: pl.DataFrame, output_path=None):
-    """Plot comparison of Allele Frequency Spectrum between SLiM and msprime simulations
-    using pre-computed AFS from compare_sims
+def check_significant_differences(
+    test_results: dict, significance_level: float = 0.05
+) -> bool:
+    """Check if any tests show significant differences.
 
     Args:
-        stats_df: Polars DataFrame containing 'afs' and 'sim_engine' columns
-        output_path: Optional path to save figure to
+        test_results: Dict of statistical test results from compute_comparison_stats
+        significance_level: P-value threshold for significance
+
+    Returns:
+        bool: True if all tests pass (no significant differences), False otherwise
     """
-    import matplotlib.pyplot as plt
-    import numpy as np
+    failed_tests = []
 
-    # Create figure
-    fig, ax = plt.subplots(figsize=(10, 6))
+    for stat, result in test_results.items():
+        if result["p_value"] < significance_level:
+            failed_tests.append(f"{stat}: p={result['p_value']:.4f}")
 
-    # Process AFS for each simulation type
-    for sim_engine, color in zip(["slim", "msprime"], ["blue", "orange"]):
-        # Get AFS arrays for this simulation type
-        afs_list = stats_df.filter(pl.col("sim_engine") == sim_engine)["afs"].to_list()
-
-        # Convert list of AFS to array
-        afs_array = np.array([afs[1:-1] for afs in afs_list])  # Exclude fixed variants
-
-        # Normalize each AFS
-        sums = afs_array.sum(axis=1, keepdims=True)
-        afs_array = afs_array / sums
-
-        # Calculate mean and standard deviation
-        mean_afs = np.mean(afs_array, axis=0)
-        std_afs = np.std(afs_array, axis=0)
-
-        # Create x-axis positions (allele counts)
-        x = np.arange(1, len(mean_afs) + 1)
-
-        # Plot mean and confidence interval
-        ax.plot(x, mean_afs, label=sim_engine, color=color)
-        ax.fill_between(
-            x, mean_afs - std_afs, mean_afs + std_afs, alpha=0.2, color=color
-        )
-
-    ax.set_xlabel("Allele count")
-    ax.set_ylabel("Proportion of variants")
-    ax.set_title("Allele Frequency Spectrum Comparison")
-    ax.legend()
-    ax.grid(True, linestyle="--", alpha=0.7)
-    ax.set_yscale("log")
-
-    plt.tight_layout()
-    if output_path:
-        plt.savefig(output_path, dpi=300, bbox_inches="tight")
-    plt.close()
+    if failed_tests:
+        print("\nSignificant differences found:")
+        for test in failed_tests:
+            print(f"- {test}")
+        return False
+    return True

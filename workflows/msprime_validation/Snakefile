@@ -16,8 +16,8 @@ NUM_SAMPLES = config["num_samples"]
 OUTPUT_DIR = "test_outputs"
 
 rule convert_demes_json:
-    input: yml="../examples/{model}.yml"
-    output: json="../examples/{model}_q{q}.json"
+    input: yml="demes_specs/{model}.yml"
+    output: json="demes_specs/json/{model}_q{q}.json"
     run:
         rescale_q = safe_float(wildcards.q)
         slimdemes.convert_demes_to_json(input_file=input.yml,
@@ -27,7 +27,7 @@ rule convert_demes_json:
 
 # Rule to run a single SLiM simulation
 rule run_slim:
-    input: json="../examples/{model}_q{q}.json", slim="test_sim.slim"
+    input: json="demes_specs/json/{model}_q{q}.json", slim="test_sim.slim"
     output: f"{OUTPUT_DIR}/{{model}}_q{{q}}/slim/rep{{replicate}}.trees"
     params:
         sequence_length=config["sequence_length"]
@@ -55,7 +55,6 @@ rule run_msprime:
             out=Path(output.trees)
         )
 
-
 # Rule to generate and save comparison statistics
 rule generate_comparison_stats:
     input:
@@ -66,7 +65,7 @@ rule generate_comparison_stats:
                          model=MODELS, q=QS, replicate=list(range(N_REPLICATES)))
     output:
         stats=f"{OUTPUT_DIR}/{{model}}_q{{q}}/n_{{num_samples}}/comparison_stats.csv",
-        afs=f"{OUTPUT_DIR}/{{model}}_q{{q}}/n_{{num_samples}}/afs_data.npy"
+        afs_data=f"{OUTPUT_DIR}/{{model}}_q{{q}}/n_{{num_samples}}/afs_data.npz"
     run:
         from slimdemes.testing import compare_sims
         import numpy as np
@@ -80,55 +79,58 @@ rule generate_comparison_stats:
             replicates=N_REPLICATES
         )
 
-        # Extract AFS data and save separately as numpy array
-        afs_data = np.array([np.array(afs) for afs in stats_df['afs']])
-        np.save(output.afs, afs_data)
+        # Extract all AFS columns (global and per-population)
+        afs_columns = {col: stats_df[col].to_list() for col in stats_df.columns
+                      if col.startswith('afs')}
 
-        # Save other stats to CSV after dropping AFS column
-        stats_df.drop('afs').write_csv(output.stats)
+        # Convert to numpy arrays and save all AFS data together
+        afs_arrays = {col: np.array([np.array(afs) for afs in data])
+                     for col, data in afs_columns.items()}
+        np.savez(output.afs_data, **afs_arrays)
+
+        # Save other stats to CSV after dropping AFS columns
+        stats_df_clean = stats_df.select(
+            [col for col in stats_df.columns if not col.startswith('afs')]
+        )
+        stats_df_clean.write_csv(output.stats)
 
 # Rule to create regular statistics comparison plot
 rule plot_comparison_stats:
     input:
-        stats=rules.generate_comparison_stats.output.stats
+        stats=rules.generate_comparison_stats.output.stats,
+        afs_data=rules.generate_comparison_stats.output.afs_data
     output:
         plot=f"{OUTPUT_DIR}/{{model}}_q{{q}}/n_{{num_samples}}/comparison_plot_stats.pdf"
     run:
-        from slimdemes.testing import plot_stats_comparison
-        import polars as pl
-
-        # Read stats and create plot
-        stats_df = pl.read_csv(input.stats)
-        plot_stats_comparison(stats_df, output.plot)
-
-# Rule to create AFS comparison plot
-rule plot_afs_comparison:
-    input:
-        stats=rules.generate_comparison_stats.output.stats,
-        afs=rules.generate_comparison_stats.output.afs
-    output:
-        plot=f"{OUTPUT_DIR}/{{model}}_q{{q}}/n_{{num_samples}}/comparison_plot_afs.pdf"
-    run:
-        from slimdemes.testing import plot_afs_comparison
         import polars as pl
         import numpy as np
+        from slimdemes.testing import (
+            plot_stats_comparison,
+            compute_comparison_stats,
+            check_significant_differences
+        )
 
         # Read stats and AFS data
         stats_df = pl.read_csv(input.stats)
-        afs_data = np.load(input.afs)
+        afs_data = np.load(input.afs_data)
 
-        # Add AFS back to DataFrame
-        stats_df = stats_df.with_columns(pl.Series("afs", afs_data.tolist()))
+        # Add AFS data back to DataFrame
+        for col in afs_data.files:
+            stats_df = stats_df.with_columns(pl.Series(col, afs_data[col].tolist()))
+
+        # Compute statistical tests
+        test_results = compute_comparison_stats(stats_df)
 
         # Create plot
-        plot_afs_comparison(stats_df, output.plot)
+        plot_stats_comparison(stats_df, test_results, output.plot)
 
-# Update the all rule to include all outputs
+        # Check for significant differences
+        if not check_significant_differences(test_results):
+            raise ValueError("Significant differences found between SLiM and msprime simulations")
+
 rule all:
     input:
-        expand(rules.run_slim.output, model=MODELS, q=QS, replicate=list(range(N_REPLICATES))),
-        expand(rules.run_msprime.output, model=MODELS, q=QS, num_samples=NUM_SAMPLES, replicate=list(range(N_REPLICATES))),
+        #expand(rules.run_slim.output, model=MODELS, q=QS, replicate=list(range(N_REPLICATES))),
+        #expand(rules.run_msprime.output, model=MODELS, q=QS, num_samples=NUM_SAMPLES, replicate=list(range(N_REPLICATES))),
         expand(rules.generate_comparison_stats.output.stats, num_samples=NUM_SAMPLES, model=MODELS, q=QS),
-        expand(rules.generate_comparison_stats.output.afs, num_samples=NUM_SAMPLES, model=MODELS, q=QS),
         expand(rules.plot_comparison_stats.output.plot, num_samples=NUM_SAMPLES, model=MODELS, q=QS),
-        expand(rules.plot_afs_comparison.output.plot, num_samples=NUM_SAMPLES, model=MODELS, q=QS)
