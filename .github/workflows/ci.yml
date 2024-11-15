@@ -1,6 +1,4 @@
-# .github/workflows/ci.yml
 name: CI
-
 on:
   push:
     branches:
@@ -19,33 +17,94 @@ jobs:
           - '3.12'
     steps:
       - uses: actions/checkout@v4
-
+        with:
+          fetch-depth: 0
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y llvm
-
+          sudo apt-get install -y \
+            build-essential \
+            clang \
+            clang-tools \
+            lld \
+            llvm \
+            cmake \
+            qt6-base-dev \
+            qtbase5-dev \
+            libqt5widgets5 \
+            libqt5core5a
+          sudo ln -sf $(which llvm-ar) /usr/local/bin/ar
+          echo "/usr/local/bin" >> $GITHUB_PATH
+          echo "$(dirname $(which clang))" >> $GITHUB_PATH
+          echo "$(dirname $(which llvm-ar))" >> $GITHUB_PATH
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: 'pip'
       - name: Install uv
         uses: astral-sh/setup-uv@v3
         with:
           version: 0.4.x
+      - name: Install SLiM
+        if: steps.cache-slim.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p ~/.local/bin
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+          curl -sSL https://raw.githubusercontent.com/vsbuffalo/slim-installer/main/install.sh | bash
+      - name: Verify SLiM installation
+        run: |
+          which slim
+          slim -v
       - name: Run tests
         run: |
-          uv run pytest tests/ -v
+          uv venv
+          # Install build dependencies first
+          uv run pip install --upgrade pip setuptools wheel
+          uv run pip install 'cython>=3.0.0' 'setuptools_scm[toml]>=8.0'
+          # Print Python version for debugging
+          uv run python --version
+          # Install datrie with specific build configuration
+          ARCHFLAGS="-arch x86_64" \
+          AR="llvm-ar" \
+          CC="clang" \
+          CXX="clang++" \
+          LDSHARED="clang -shared" \
+          uv run pip install --no-build-isolation datrie
+          # Install snakemake and its dependencies
+          uv run pip install 'pytest>=8.3.3'
+          uv run pip install 'snakemake>=8.24.1'
+          # Print snakemake version for debugging
+          uv run snakemake --version
+          # Install the package in development mode
+          uv run pip install -e .
+          # Run tests
+          PYTHONPATH="${PYTHONPATH}:${PWD}/src" uv run pytest tests/ -v
         env:
           UV_PYTHON: '${{ matrix.python-version }}'
+          PATH: "$HOME/.local/bin:/usr/local/bin:$PATH"
+          CFLAGS: "-fPIC"
+          LDFLAGS: "-fPIC"
+          CC: "clang"
+          CXX: "clang++"
+          LDSHARED: "clang -shared"
+          AR: "llvm-ar"
 
   lint:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
       - name: Install uv
         uses: astral-sh/setup-uv@v3
         with:
           version: 0.4.x
-      - name: Lint with ruff
+      - name: Lint
         run: |
-          uvx ruff check .
-      - name: Check formatting with black
-        run: |
-          uvx black --check .
+          uv venv
+          uv run pip install ruff black
+          uv run ruff check .
+          uv run black --check .
