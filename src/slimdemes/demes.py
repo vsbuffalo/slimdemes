@@ -25,8 +25,8 @@ def check_deme_feature_support(graph):
     if "migrations" in graph:
         raise NotImplementedError(msg.format(feature="with migrations"))
     print(graph)
-    for demes in graph["demes"]:
-        for epoch in demes["epochs"]:
+    for deme in graph["demes"]:
+        for epoch in deme["epochs"]:
             if epoch.get("cloning_rate", 0.0) != 0.0:
                 raise NotImplementedError(
                     msg.format(feature="epochs with cloning_rate ≠ 0.0")

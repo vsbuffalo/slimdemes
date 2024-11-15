@@ -1,14 +1,11 @@
 import pytest
 import os
-import yaml
 from pathlib import Path
 from snakemake.api import DAGSettings
 from snakemake.api import ResourceSettings
 from snakemake.api import SnakemakeApi
 from snakemake.settings.types import OutputSettings
 from snakemake.settings.types import Quietness
-import polars as pl
-from scipy import stats
 
 SNAKEFILE = Path("workflows/msprime_validation/Snakefile")
 WORKFLOW_DIR = SNAKEFILE.parent

@@ -1,5 +1,4 @@
 import itertools
-import scipy
 import polars as pl
 import numpy as np
 import tskit
@@ -306,7 +305,6 @@ def compute_comparison_stats(stats_df: pl.DataFrame):
         dict: Statistical test results for both regular stats and AFS
     """
     from scipy import stats
-    import numpy as np
 
     results = {}
 
@@ -378,7 +376,6 @@ def plot_stats_comparison(stats_df: pl.DataFrame, test_results: dict, output_pat
         test_results: Dict of statistical test results from compute_comparison_stats
         output_path: Optional path to save figure to
     """
-    import numpy as np
     import matplotlib.pyplot as plt
 
     # Separate AFS columns from other statistics
