@@ -1,3 +1,5 @@
+[![CI](https://github.com/vsbuffalo/slimdemes/actions/workflows/ci.yml/badge.svg)](https://github.com/vsbuffalo/slimdemes/actions/workflows/ci.yml)
+
 # slimdemes
 
 This is a simple, *partial* implementation of
@@ -22,4 +24,8 @@ library). Overall, this approach means shifting a lot of the demes handling to
 well-established Python packages like `demes` and `moments`, rather than trying
 to implement everything in SLiM's Eidos language.
 
+## Validation Plots
 
+![Comparison plot statistics](./workflows/msprime_validation/test_outputs/OutOfAfricaArchaicAdmixture_5R19_qNone/n_10/comparison_plot_stats.png)
+
+![Comparison plot statistics](./workflows/msprime_validation/test_outputs/OutOfAfricaArchaicAdmixture_5R19_q10/n_10/comparison_plot_stats.png)

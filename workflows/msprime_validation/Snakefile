@@ -100,7 +100,8 @@ rule plot_comparison_stats:
         stats=rules.generate_comparison_stats.output.stats,
         afs_data=rules.generate_comparison_stats.output.afs_data
     output:
-        plot=f"{OUTPUT_DIR}/{{model}}_q{{q}}/n_{{num_samples}}/comparison_plot_stats.pdf"
+        plot_pdf=f"{OUTPUT_DIR}/{{model}}_q{{q}}/n_{{num_samples}}/comparison_plot_stats.pdf",
+        plot_png=f"{OUTPUT_DIR}/{{model}}_q{{q}}/n_{{num_samples}}/comparison_plot_stats.png",
     run:
         import polars as pl
         import numpy as np
@@ -122,7 +123,8 @@ rule plot_comparison_stats:
         test_results = compute_comparison_stats(stats_df)
 
         # Create plot
-        plot_stats_comparison(stats_df, test_results, output.plot)
+        plot_stats_comparison(stats_df, test_results, output.plot_pdf)
+        plot_stats_comparison(stats_df, test_results, output.plot_png)
 
         ## Check for significant differences
         #if not check_significant_differences(test_results):
@@ -133,4 +135,5 @@ rule all:
         #expand(rules.run_slim.output, model=MODELS, q=QS, replicate=list(range(N_REPLICATES))),
         #expand(rules.run_msprime.output, model=MODELS, q=QS, num_samples=NUM_SAMPLES, replicate=list(range(N_REPLICATES))),
         expand(rules.generate_comparison_stats.output.stats, num_samples=NUM_SAMPLES, model=MODELS, q=QS),
-        expand(rules.plot_comparison_stats.output.plot, num_samples=NUM_SAMPLES, model=MODELS, q=QS),
+        expand(rules.plot_comparison_stats.output.plot_pdf, num_samples=NUM_SAMPLES, model=MODELS, q=QS),
+        expand(rules.plot_comparison_stats.output.plot_png, num_samples=NUM_SAMPLES, model=MODELS, q=QS),
