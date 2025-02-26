@@ -5,7 +5,7 @@ import yaml
 
 
 def remove_gene_flow(graph):
-    msg = "Removing '{block}' from demes graph, " "since --ignore-gene-flow is set."
+    msg = "Removing '{block}' from demes graph, since --ignore-gene-flow is set."
     if "pulses" in graph:
         warnings.warn(msg.format(block="pulses"))
         graph.pop("pulses")

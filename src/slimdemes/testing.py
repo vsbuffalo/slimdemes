@@ -416,7 +416,7 @@ def plot_stats_comparison(stats_df: pl.DataFrame, test_results: dict, output_pat
 
         # Add test results to plot title - color red if significant
         title_color = "red" if result["significant"] else "black"
-        title = f"{stat}\n" f"t={result['test_stat']:.3f}, p={result['p_value']:.3f}"
+        title = f"{stat}\nt={result['test_stat']:.3f}, p={result['p_value']:.3f}"
         ax.set_title(title, color=title_color)
         ax.grid(True, linestyle="--", alpha=0.7)
 

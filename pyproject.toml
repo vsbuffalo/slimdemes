@@ -46,3 +46,31 @@ slimdemes = ["*"]
 
 [tool.setuptools_scm]
 write_to = "src/slimdemes/_version.py"
+
+[tool.black]
+line-length = 88
+exclude = '''
+/(
+    \.git
+  | \.hg
+  | \.mypy_cache
+  | \.tox
+  | \.venv
+  | venv
+  | _build
+  | buck-out
+  | build
+  | dist
+  | _version\.py
+)/
+'''
+
+[tool.ruff]
+exclude = [
+    ".git",
+    ".venv",
+    "venv",
+    ".tox",
+    "build",
+    "dist",
+]
