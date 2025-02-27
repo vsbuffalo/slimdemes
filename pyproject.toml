@@ -10,7 +10,10 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "slimdemes"
 version = "0.1.0"
-description = "Helper Python scripts for slim-demes"
+description = "Python package for demographic modeling with SLiM and demes"
+authors = [
+    {name = "Vince Buffalo", email = "vsbuffalo@gmail.com"}
+]
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
@@ -27,6 +30,10 @@ dependencies = [
     "stdpopsim>=0.2.0",
     "timestamp>=0.0.1",
 ]
+
+[project.urls]
+"Homepage" = "https://github.com/vsbuffalo/slimdemes"
+"Bug Tracker" = "https://github.com/vsbuffalo/slimdemes/issues"
 
 [project.scripts]
 slimdemes = "slimdemes.main:main"
