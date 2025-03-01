@@ -91,28 +91,90 @@ function (float)get_epoch_end(object$ epoch) {
 }
 
 // Return the time bounds of the demes model.
+// Return the time bounds of the demes model.
 function (object<Dictionary>$)event_time_bounds(object<Dictionary>$ model, [float$ burn_in = 0.0]) {
   t_max = 0.0;
   t_min = INF;
   demes = get_demes(model);
 
+  // Track if we have any non-zero end_time values
+  has_nonzero_end_time = F;
+  // Track if we have any finite start_time values
+  has_finite_start_time = F;
+  // Track ancestral population sizes (from demes with infinite start times)
+  ancestral_pop_sizes = c();
+
   for (i in seqLen(size(demes))) {
     deme = demes[i];
     epochs = get_epochs(deme);
+
+    // Check if this is an ancestral population (infinite start time)
+    deme_start_time = NULL;
+    if (dictContains(deme, "start_time")) {
+      start_time_value = deme.getValue("start_time");
+      if (isString(start_time_value) & (match(asString(start_time_value), "Infinity") != -1)) {
+        deme_start_time = INF;
+      } else if (!isNULL(start_time_value)) {
+        deme_start_time = asFloat(start_time_value);
+      }
+    }
+
+    is_ancestral = isInfinite(deme_start_time);
 
     for (j in seqLen(size(epochs))) {
       epoch = epochs[j];
       start_time = get_epoch_start(epoch, deme, j);
       end_time = get_epoch_end(epoch);
 
+      // If this is an ancestral population and the first epoch,
+      // track the starting population size
+      if (is_ancestral & (j == 0)) {
+        ancestral_size = asFloat(epoch.getValue("start_size"));
+        ancestral_pop_sizes = c(ancestral_pop_sizes, ancestral_size);
+      }
+
       if (!isInfinite(start_time)) {
         t_max = max(t_max, start_time);
+        has_finite_start_time = T;
       }
       t_max = max(t_max, end_time);
       t_min = min(t_min, end_time);
+
+      if (end_time > 0) {
+        has_nonzero_end_time = T;
+      }
     }
   }
-  assert(t_max > t_min);
+
+  // Handle the special case of a population with infinite start time
+  // and no explicit finite time points other than end_time = 0
+  if (t_max == t_min & t_min == 0 & !has_nonzero_end_time) {
+    // Default value in case we can't determine ancestral sizes
+    suggested_t_max = 1000.0;
+
+    if (size(ancestral_pop_sizes) > 0) {
+      // If we have ancestral population sizes, use 10 * the mean of them
+      mean_ancestral_size = sum(ancestral_pop_sizes) / size(ancestral_pop_sizes);
+      suggested_t_max = 10.0 * mean_ancestral_size;
+
+      catn("Notice: Population(s) with infinite history detected.");
+      catn("Setting simulation bounds to [0, " + asString(suggested_t_max) + "] based on 10 × ancestral population size.");
+    } else {
+      catn("Notice: Population with infinite history detected, but couldn't determine ancestral size.");
+      catn("Setting simulation bounds to [0, " + asString(suggested_t_max) + "].");
+    }
+
+    // Cap it at a reasonable maximum to prevent excessively long simulations
+    suggested_t_max = min(suggested_t_max, 1000000.0);
+
+    // Use at least 100 generations to ensure some meaningful simulation time
+    t_max = max(100.0, suggested_t_max);
+
+    catn("You can override this by explicitly setting start_time in your demes model.");
+  } else {
+    // Normal case - make sure t_max > t_min
+    assert(t_max > t_min);
+  }
 
   // Create dictionary with min, max, and burn_in
   time_bounds = Dictionary();
@@ -180,7 +242,7 @@ function (object<Dictionary>$)setup_populations(object<Dictionary>$ model, objec
 // Check if a deme has ancestors
 function (logical$)has_ancestors(object<Dictionary>$ deme) {
   if (!dictContains(deme, "ancestors")) {
-    return FALSE;
+    return F;
   }
   ancestors = deme.getValue("ancestors");
   return size(ancestors) > 0;

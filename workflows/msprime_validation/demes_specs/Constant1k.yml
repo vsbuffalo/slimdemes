@@ -1,0 +1,20 @@
+description: "A single population of size 1,000, constant up to the present"
+doi: []
+time_units: generations
+generation_time: 1
+metadata: {}
+demes:
+  - name: pop1
+    description: "Root population with constant size"
+    ancestors: []
+    proportions: []
+    start_time: Infinity
+    epochs:
+      - end_time: 0
+        start_size: 1000
+        end_size: 1000
+        size_function: constant
+        cloning_rate: 0
+        selfing_rate: 0
+pulses: []
+migrations: []

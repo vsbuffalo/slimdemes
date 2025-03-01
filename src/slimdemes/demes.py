@@ -38,8 +38,28 @@ def check_deme_feature_support(graph):
 
 
 def load_demes(demes_file, ignore_gene_flow, convert_to_generations):
+    """
+    Load a demes graph from a YAML file.
+
+    Parameters
+    ----------
+    demes_file : str
+        Path to YAML file containing demes graph specification
+    ignore_gene_flow : bool
+        If True, remove gene flow (pulses and migrations) from the graph
+    convert_to_generations : bool
+        If True, convert time units to generations
+
+    Returns
+    -------
+    demes.Graph
+        The loaded demes graph
+    """
     with open(demes_file) as f:
         data = yaml.safe_load(f)
+
+    # Convert any "Infinity" strings to float('inf')
+    data = convert_infinity_strings(data)
 
     if ignore_gene_flow:
         data = remove_gene_flow(data)
@@ -51,6 +71,29 @@ def load_demes(demes_file, ignore_gene_flow, convert_to_generations):
         graph = graph.in_generations()
 
     return graph
+
+
+def convert_infinity_strings(obj):
+    """
+    Recursively convert "Infinity" strings to float('inf') in
+    nested data structures.
+
+    Parameters
+    ----------
+    obj : dict, list, str, or other
+        Object to process
+
+    Returns
+    -------
+    Same type as input, with "Infinity" strings converted to float('inf')
+    """
+    if isinstance(obj, dict):
+        return {k: convert_infinity_strings(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [convert_infinity_strings(v) for v in obj]
+    elif isinstance(obj, str) and obj == "Infinity":
+        return float("inf")
+    return obj
 
 
 def load_demes_json(demes_json_file):

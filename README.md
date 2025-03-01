@@ -27,17 +27,21 @@ to implement everything in SLiM's Eidos language.
 The command line tool converts the
 
 ```
-$ slimdemes convert --rescale-q 10 --out demes_q10.json --ignore-gene-flow demes.yaml
+$ slimdemes convert --rescale-q 10 --out demes_q10.json --ignore-gene-flow demes.yml
 ```
 
 which runs
 
 ```python
-slimdemes.convert_demes_to_json(input_file=input.yml,
+slimdemes.convert_demes_to_json(input_file="demes.yml",
                                 ignore_gene_flow=True,
-                                rescale_q=rescale_q,
-                                out=output.json)
+                                rescale_q=10,
+                                out="demes_q10.json")
 ```
+
+Note that **slimdemes** only rescales the *demography*, and not selection or
+recombination. See the `workflows/msprime_validation/test_sim.slim` for how an
+example of how to rescale these in your own SLiM simulation code.
 
 
 ## Validation Plots
