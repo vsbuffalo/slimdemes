@@ -41,8 +41,7 @@ def run_msprime(
     demography = msprime.Demography.from_demes(graph)
 
     # Set up sampling
-    num_samples = {
-        deme.name: num_samples for deme in graph.demes if deme.end_time == 0}
+    num_samples = {deme.name: num_samples for deme in graph.demes if deme.end_time == 0}
 
     samples = []
     for deme_name, n in num_samples.items():

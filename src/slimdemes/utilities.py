@@ -51,8 +51,7 @@ def subsample_by_population(ts, num_samples, seed=None):
                 f"Population {pop} has fewer individuals ({len(ind_ids)}) "
                 f"than requested samples ({num_samples}): {ind_ids}"
             )
-        sampled_ids.extend(random.sample(
-            ind_ids, min(num_samples, len(ind_ids))))
+        sampled_ids.extend(random.sample(ind_ids, min(num_samples, len(ind_ids))))
 
     return sampled_ids
 
