@@ -112,7 +112,7 @@ jobs:
             git commit -m "Update test output images [skip ci]" || echo "No changes to commit"
 
             # Push using the provided token
-            git push
+            git push -f
           else
             echo "No changes in test outputs"
           fi

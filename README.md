@@ -10,7 +10,7 @@ old and not compatible with SLiM version 4. **Note that this implementation
 does not support gene flow (e.g. the migrations and pulses blocks in the deme
 specification), nor selfing/cloning rates.**
 
-Validation of a YAML demes file is done entirely through the
+Validation and rescaling of a YAML demes file is done entirely through the
 [demes](https://popsim-consortium.github.io/demes-docs/latest/introduction.html)
 Python package. This is, in my view, a cleaner way to interface SLiM with
 demes, since SLiM does not have native YAML parsing and requires that demes
@@ -23,6 +23,22 @@ rescaled too (which is done with Aaron Ragsdale's
 library). Overall, this approach means shifting a lot of the demes handling to
 well-established Python packages like `demes` and `moments`, rather than trying
 to implement everything in SLiM's Eidos language.
+
+The command line tool converts the
+
+```
+$ slimdemes convert --rescale-q 10 --out demes_q10.json --ignore-gene-flow demes.yaml
+```
+
+which runs
+
+```python
+slimdemes.convert_demes_to_json(input_file=input.yml,
+                                ignore_gene_flow=True,
+                                rescale_q=rescale_q,
+                                out=output.json)
+```
+
 
 ## Validation Plots
 
