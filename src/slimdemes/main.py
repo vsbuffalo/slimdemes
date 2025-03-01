@@ -35,13 +35,14 @@ def run_msprime(
     # Apply rescaling if specified
     if rescale_q is not None:
         assert rescale_q >= 1.0, "q in rescale_q must be >= 1.0"
-        graph = rescale_demes(graph, 1 / rescale_q)
+        graph = rescale_demes(graph, rescale_q)
 
     # Convert demes graph to msprime demography
     demography = msprime.Demography.from_demes(graph)
 
     # Set up sampling
-    num_samples = {deme.name: num_samples for deme in graph.demes if deme.end_time == 0}
+    num_samples = {
+        deme.name: num_samples for deme in graph.demes if deme.end_time == 0}
 
     samples = []
     for deme_name, n in num_samples.items():
@@ -91,7 +92,7 @@ def convert(
     if rescale_q is not None:
         rescale_q = float(rescale_q)
         assert rescale_q >= 1.0, "q in --rescale-q must be >= 1.0"
-        graph = rescale_demes(graph, 1 / rescale_q)
+        graph = rescale_demes(graph, rescale_q)
 
     data = graph.asdict()
 

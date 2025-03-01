@@ -1,6 +1,7 @@
 import random
 import pyslim
 from collections import defaultdict
+from warnings import warn
 
 
 def safe_float(value):
@@ -46,10 +47,12 @@ def subsample_by_population(ts, num_samples, seed=None):
     sampled_ids = []
     for pop, ind_ids in grouped_by_pop.items():
         if len(ind_ids) < num_samples:
-            raise ValueError(
-                f"Population {pop} has fewer individuals ({len(ind_ids)}) than requested samples ({num_samples})"
+            warn(
+                f"Population {pop} has fewer individuals ({len(ind_ids)}) "
+                f"than requested samples ({num_samples}): {ind_ids}"
             )
-        sampled_ids.extend(random.sample(ind_ids, num_samples))
+        sampled_ids.extend(random.sample(
+            ind_ids, min(num_samples, len(ind_ids))))
 
     return sampled_ids
 
